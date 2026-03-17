@@ -1,5 +1,8 @@
 import { Command, Options } from "@effect/cli";
 import { Console, Effect } from "effect";
+import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
 import { readConfig } from "./Config.js";
 import { DockerSandbox } from "./DockerSandbox.js";
 import { FilesystemSandbox } from "./FilesystemSandbox.js";
@@ -8,6 +11,8 @@ import {
   cleanupContainer,
   startContainer,
 } from "./DockerLifecycle.js";
+import { orchestrate } from "./Orchestrator.js";
+import { SandboxError } from "./Sandbox.js";
 import { syncIn, syncOut } from "./SyncService.js";
 
 // --- Shared options ---
@@ -153,6 +158,105 @@ const syncOutCommand = Command.make(
     }),
 );
 
+// --- Run command ---
+
+const iterationsOption = Options.integer("iterations").pipe(
+  Options.withDescription("Number of agent iterations to run"),
+);
+
+const promptFileOption = Options.file("prompt-file").pipe(
+  Options.withDescription("Path to the prompt file for the agent"),
+  Options.optional,
+);
+
+const detectRepoFullName = (cwd: string): Effect.Effect<string, SandboxError> =>
+  Effect.async((resume) => {
+    execFile(
+      "gh",
+      ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"],
+      { cwd },
+      (error, stdout) => {
+        if (error) {
+          resume(
+            Effect.fail(
+              new SandboxError(
+                "detectRepo",
+                `Failed to detect repo name: ${error.message}`,
+              ),
+            ),
+          );
+        } else {
+          resume(Effect.succeed(stdout.toString().trim()));
+        }
+      },
+    );
+  });
+
+const DEFAULT_PROMPT_PATH = join(
+  import.meta.dirname,
+  "..",
+  "docker-container-experiment",
+  "prompt.md",
+);
+
+const runCommand = Command.make(
+  "run",
+  {
+    container: containerOption,
+    iterations: iterationsOption,
+    imageName: imageNameOption,
+    promptFile: promptFileOption,
+  },
+  ({ container, iterations, promptFile }) =>
+    Effect.gen(function* () {
+      const hostRepoDir = process.cwd();
+      const repoName = hostRepoDir.split("/").pop()!;
+      const sandboxRepoDir = `${SANDBOX_REPOS_DIR}/${repoName}`;
+
+      // Detect repo full name for issue fetching
+      const repoFullName = yield* detectRepoFullName(hostRepoDir);
+
+      // Load prompt
+      const promptPath =
+        promptFile._tag === "Some" ? promptFile.value : DEFAULT_PROMPT_PATH;
+      const prompt = yield* Effect.tryPromise({
+        try: () => readFile(promptPath, "utf-8"),
+        catch: (e) =>
+          new SandboxError("readPrompt", `Failed to read prompt: ${e}`),
+      });
+
+      // Read config
+      const config = yield* readConfig(hostRepoDir);
+
+      yield* Console.log(`=== SANDCASTLE RUN ===`);
+      yield* Console.log(`Repo:       ${repoFullName}`);
+      yield* Console.log(`Container:  ${container}`);
+      yield* Console.log(`Iterations: ${iterations}`);
+      yield* Console.log(``);
+
+      const layer = DockerSandbox.layer(container);
+
+      const result = yield* orchestrate({
+        hostRepoDir,
+        sandboxRepoDir,
+        iterations,
+        config,
+        repoFullName,
+        prompt,
+      }).pipe(Effect.provide(layer));
+
+      if (result.complete) {
+        yield* Console.log(
+          `\nRun complete: agent finished after ${result.iterationsRun} iteration(s).`,
+        );
+      } else {
+        yield* Console.log(
+          `\nRun complete: reached ${result.iterationsRun} iteration(s) without completion signal.`,
+        );
+      }
+    }),
+);
+
 // --- Root command ---
 
 const rootCommand = Command.make("sandcastle", {}, () =>
@@ -168,6 +272,7 @@ export const sandcastle = rootCommand.pipe(
     syncOutCommand,
     setupCommand,
     cleanupCommand,
+    runCommand,
   ]),
 );
 

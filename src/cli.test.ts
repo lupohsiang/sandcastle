@@ -121,5 +121,6 @@ describe("sandcastle CLI", () => {
     expect(stdout).toContain("sync-out");
     expect(stdout).toContain("setup");
     expect(stdout).toContain("cleanup");
+    expect(stdout).toContain("run");
   });
 });
