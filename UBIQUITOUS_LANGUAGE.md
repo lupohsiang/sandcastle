@@ -27,6 +27,15 @@
 | **Completion signal** | The `<promise>COMPLETE</promise>` marker in the agent's output indicating all actionable tasks are finished                    | "done flag", "exit signal"                              |
 | **Orchestrator**      | The module that drives the iteration loop: sync-in, invoke agent, check for commits, sync-out, check completion signal, repeat | "runner", "loop", "wrapper script"                      |
 
+## Project structure
+
+| Term                 | Definition                                                                                                                 | Aliases to avoid                       |
+| -------------------- | -------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| **Config directory** | The `.sandcastle/` directory in a host repo containing sandbox configuration: Dockerfile, prompt, config, and env settings | ".sandcastle folder", "sandcastle dir" |
+| **Init**             | The CLI command that scaffolds the **config directory** in a host repo and builds+starts the container                     | "create", "bootstrap", "new"           |
+| **Setup-sandbox**    | The CLI command that builds the Docker image and starts a container from an existing **config directory**                  | "setup" (old name)                     |
+| **Cleanup-sandbox**  | The CLI command that stops and removes the container and image                                                             | "cleanup" (old name)                   |
+
 ## Architecture
 
 | Term                 | Definition                                                                                                          | Aliases to avoid                     |
@@ -44,6 +53,9 @@
 - **Sync-in** creates a **bundle** on the **host** and unpacks it in the **sandbox**
 - **Sync-out** generates **patches** in the **sandbox** and applies them on the **host**
 - Each **iteration** may produce one **patch**; iterations repeat until the **completion signal** fires or the max count is reached
+- **Init** creates the **config directory** on the **host** and then performs **setup-sandbox**
+- **Setup-sandbox** requires the **config directory** to already exist on the **host**
+- Token resolution: repo root `.env` > **config directory** `.env` > process environment variables
 
 ## Example dialogue
 
