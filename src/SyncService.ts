@@ -117,6 +117,48 @@ export const syncIn = (
       });
     }
 
+    // Configure remotes from host
+    const hostRemotes = (yield* execHost("git remote -v", hostRepoDir)).trim();
+    if (hostRemotes.length > 0) {
+      // Parse unique remote names and their fetch URLs
+      const remotes = new Map<string, string>();
+      for (const line of hostRemotes.split("\n")) {
+        const match = line.match(/^(\S+)\t(\S+)\s+\(fetch\)$/);
+        if (match) {
+          remotes.set(match[1], match[2]);
+        }
+      }
+
+      // Get existing sandbox remotes
+      const sandboxRemotes = (yield* execOk(sandbox, "git remote", {
+        cwd: sandboxRepoDir,
+      })).stdout
+        .trim()
+        .split("\n")
+        .filter((r) => r.length > 0);
+
+      for (const [name, url] of remotes) {
+        if (sandboxRemotes.includes(name)) {
+          yield* execOk(sandbox, `git remote set-url "${name}" "${url}"`, {
+            cwd: sandboxRepoDir,
+          });
+        } else {
+          yield* execOk(sandbox, `git remote add "${name}" "${url}"`, {
+            cwd: sandboxRepoDir,
+          });
+        }
+      }
+
+      // Remove sandbox remotes that don't exist on host
+      for (const name of sandboxRemotes) {
+        if (!remotes.has(name)) {
+          yield* execOk(sandbox, `git remote remove "${name}"`, {
+            cwd: sandboxRepoDir,
+          });
+        }
+      }
+    }
+
     // Clean up temp files
     yield* sandbox.exec(`rm -rf "${sandboxTmpDir}"`);
     yield* Effect.promise(() => rm(bundleDir, { recursive: true }));

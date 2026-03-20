@@ -582,6 +582,64 @@ describe("readConfig", () => {
   });
 });
 
+describe("git remotes", () => {
+  it("single remote — sandbox has the same remote as host", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await execAsync("git remote add origin https://github.com/foo/bar.git", {
+      cwd: hostDir,
+    });
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    await Effect.runPromise(
+      syncIn(hostDir, sandboxRepoDir).pipe(Effect.provide(layer)),
+    );
+
+    const { stdout } = await execAsync("git remote -v", {
+      cwd: sandboxRepoDir,
+    });
+    const lines = stdout.trim().split("\n");
+    const fetchLine = lines.find((l) => l.includes("(fetch)"));
+    const pushLine = lines.find((l) => l.includes("(push)"));
+    expect(fetchLine).toContain("origin");
+    expect(fetchLine).toContain("https://github.com/foo/bar.git");
+    expect(pushLine).toContain("origin");
+    expect(pushLine).toContain("https://github.com/foo/bar.git");
+  });
+
+  it("multiple remotes — sandbox has all host remotes", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await execAsync("git remote add origin https://github.com/foo/bar.git", {
+      cwd: hostDir,
+    });
+    await execAsync(
+      "git remote add upstream https://github.com/upstream/bar.git",
+      { cwd: hostDir },
+    );
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    await Effect.runPromise(
+      syncIn(hostDir, sandboxRepoDir).pipe(Effect.provide(layer)),
+    );
+
+    const { stdout } = await execAsync("git remote -v", {
+      cwd: sandboxRepoDir,
+    });
+
+    // Parse into a map of remote name -> fetch URL
+    const remotes = new Map<string, string>();
+    for (const line of stdout.trim().split("\n")) {
+      const match = line.match(/^(\S+)\t(\S+)\s+\(fetch\)$/);
+      if (match) remotes.set(match[1], match[2]);
+    }
+
+    expect(remotes.get("origin")).toBe("https://github.com/foo/bar.git");
+    expect(remotes.get("upstream")).toBe("https://github.com/upstream/bar.git");
+    expect(remotes.size).toBe(2);
+  });
+});
+
 describe("postSyncIn", () => {
   it("postSyncIn command runs after sync-in and its effects are visible", async () => {
     const { hostDir, sandboxRepoDir, layer } = await setup();
