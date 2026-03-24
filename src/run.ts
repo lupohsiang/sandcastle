@@ -3,7 +3,7 @@ import { readConfig } from "./Config.js";
 import { orchestrate } from "./Orchestrator.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import { DockerSandboxFactory } from "./SandboxFactory.js";
-import { resolveTokens } from "./TokenResolver.js";
+import { resolveEnv } from "./EnvResolver.js";
 
 export interface RunOptions {
   /** Inline prompt string (mutually exclusive with promptFile) */
@@ -61,13 +61,22 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   // Resolve model: explicit option > config > default
   const resolvedModel = model ?? config.model;
 
-  // Resolve tokens and build Docker factory layer
-  const tokens = await resolveTokens(hostRepoDir);
-  const factoryLayer = DockerSandboxFactory.layer(
-    _imageName,
-    tokens.oauthToken,
-    tokens.ghToken,
-  );
+  // Resolve env vars and build Docker factory layer
+  const env = await resolveEnv(hostRepoDir);
+
+  // Temporary hardcoded validation (will be replaced by agent provider env check)
+  if (!env["CLAUDE_CODE_OAUTH_TOKEN"]) {
+    throw new Error(
+      "CLAUDE_CODE_OAUTH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
+    );
+  }
+  if (!env["GH_TOKEN"]) {
+    throw new Error(
+      "GH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
+    );
+  }
+
+  const factoryLayer = DockerSandboxFactory.layer(_imageName, env);
 
   const result = await Effect.runPromise(
     orchestrate({

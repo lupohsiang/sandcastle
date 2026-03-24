@@ -37,13 +37,12 @@ export const buildImage = (
   });
 
 /**
- * Start a new container with auth tokens injected as environment variables.
+ * Start a new container with environment variables injected.
  */
 export const startContainer = (
   containerName: string,
   imageName: string,
-  oauthToken: string,
-  ghToken: string,
+  env: Record<string, string>,
 ): Effect.Effect<void, DockerError> =>
   Effect.gen(function* () {
     // Check if container already exists
@@ -64,15 +63,17 @@ export const startContainer = (
       );
     }
 
+    const envFlags = Object.entries(env).flatMap(([k, v]) => [
+      "-e",
+      `${k}=${v}`,
+    ]);
+
     yield* dockerExec([
       "run",
       "-d",
       "--name",
       containerName,
-      "-e",
-      `CLAUDE_CODE_OAUTH_TOKEN=${oauthToken}`,
-      "-e",
-      `GH_TOKEN=${ghToken}`,
+      ...envFlags,
       imageName,
     ]);
   });

@@ -1,0 +1,162 @@
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { resolveEnv } from "./EnvResolver.js";
+
+const makeDir = () => mkdtemp(join(tmpdir(), "env-resolver-"));
+
+describe("resolveEnv", () => {
+  it("returns all key-value pairs from repo root .env", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, ".env"),
+      "CLAUDE_CODE_OAUTH_TOKEN=root-oauth\nGH_TOKEN=root-gh\nCUSTOM_VAR=hello\n",
+    );
+
+    const env = await resolveEnv(dir);
+    expect(env).toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: "root-oauth",
+      GH_TOKEN: "root-gh",
+      CUSTOM_VAR: "hello",
+    });
+  });
+
+  it("returns all key-value pairs from .sandcastle/.env", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      "CLAUDE_CODE_OAUTH_TOKEN=sc-oauth\nGH_TOKEN=sc-gh\n",
+    );
+
+    const env = await resolveEnv(dir);
+    expect(env).toEqual({
+      CLAUDE_CODE_OAUTH_TOKEN: "sc-oauth",
+      GH_TOKEN: "sc-gh",
+    });
+  });
+
+  it("repo root .env takes precedence over .sandcastle/.env", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, ".env"),
+      "CLAUDE_CODE_OAUTH_TOKEN=root-oauth\nGH_TOKEN=root-gh\n",
+    );
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      "CLAUDE_CODE_OAUTH_TOKEN=sc-oauth\nGH_TOKEN=sc-gh\n",
+    );
+
+    const env = await resolveEnv(dir);
+    expect(env["CLAUDE_CODE_OAUTH_TOKEN"]).toBe("root-oauth");
+    expect(env["GH_TOKEN"]).toBe("root-gh");
+  });
+
+  it("merges keys from both .env files", async () => {
+    const dir = await makeDir();
+    await writeFile(join(dir, ".env"), "ROOT_ONLY=root-val\nSHARED=root\n");
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(
+      join(dir, ".sandcastle", ".env"),
+      "SC_ONLY=sc-val\nSHARED=sc\n",
+    );
+
+    const env = await resolveEnv(dir);
+    expect(env["ROOT_ONLY"]).toBe("root-val");
+    expect(env["SC_ONLY"]).toBe("sc-val");
+    expect(env["SHARED"]).toBe("root"); // root takes precedence
+  });
+
+  it("falls back to process.env for keys declared in .env files", async () => {
+    const dir = await makeDir();
+    // .env file declares the key but with empty value
+    await writeFile(join(dir, ".env"), "MY_TOKEN=\n");
+
+    const orig = process.env["MY_TOKEN"];
+    try {
+      process.env["MY_TOKEN"] = "from-process";
+      const env = await resolveEnv(dir);
+      expect(env["MY_TOKEN"]).toBe("from-process");
+    } finally {
+      if (orig === undefined) delete process.env["MY_TOKEN"];
+      else process.env["MY_TOKEN"] = orig;
+    }
+  });
+
+  it("does NOT pull keys from process.env that are not in any .env file", async () => {
+    const dir = await makeDir();
+    await writeFile(join(dir, ".env"), "DECLARED_KEY=value\n");
+
+    // PATH is always in process.env but should not appear in result
+    const env = await resolveEnv(dir);
+    expect(env["PATH"]).toBeUndefined();
+    expect(env["HOME"]).toBeUndefined();
+    expect(env["DECLARED_KEY"]).toBe("value");
+  });
+
+  it(".sandcastle/.env takes precedence over process.env", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(join(dir, ".sandcastle", ".env"), "MY_VAR=sc-val\n");
+
+    const orig = process.env["MY_VAR"];
+    try {
+      process.env["MY_VAR"] = "from-process";
+      const env = await resolveEnv(dir);
+      expect(env["MY_VAR"]).toBe("sc-val");
+    } finally {
+      if (orig === undefined) delete process.env["MY_VAR"];
+      else process.env["MY_VAR"] = orig;
+    }
+  });
+
+  it("returns empty object when no .env files exist", async () => {
+    const dir = await makeDir();
+    const env = await resolveEnv(dir);
+    expect(env).toEqual({});
+  });
+
+  it("ignores comments and blank lines in .env files", async () => {
+    const dir = await makeDir();
+    await writeFile(
+      join(dir, ".env"),
+      "# This is a comment\n\nKEY1=val1\n\n# Another comment\nKEY2=val2\n",
+    );
+
+    const env = await resolveEnv(dir);
+    expect(env).toEqual({ KEY1: "val1", KEY2: "val2" });
+  });
+
+  it("does no validation — returns whatever keys are present", async () => {
+    const dir = await makeDir();
+    // Only custom keys, no CLAUDE_CODE_OAUTH_TOKEN or GH_TOKEN
+    await writeFile(
+      join(dir, ".env"),
+      "NPM_TOKEN=npm123\nDATABASE_URL=pg://localhost\n",
+    );
+
+    const env = await resolveEnv(dir);
+    expect(env).toEqual({
+      NPM_TOKEN: "npm123",
+      DATABASE_URL: "pg://localhost",
+    });
+  });
+
+  it("process.env fallback works for keys in .sandcastle/.env too", async () => {
+    const dir = await makeDir();
+    await mkdir(join(dir, ".sandcastle"));
+    await writeFile(join(dir, ".sandcastle", ".env"), "FALLBACK_KEY=\n");
+
+    const orig = process.env["FALLBACK_KEY"];
+    try {
+      process.env["FALLBACK_KEY"] = "from-env";
+      const env = await resolveEnv(dir);
+      expect(env["FALLBACK_KEY"]).toBe("from-env");
+    } finally {
+      if (orig === undefined) delete process.env["FALLBACK_KEY"];
+      else process.env["FALLBACK_KEY"] = orig;
+    }
+  });
+});

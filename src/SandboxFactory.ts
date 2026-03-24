@@ -17,8 +17,7 @@ export class SandboxFactory extends Context.Tag("SandboxFactory")<
 export const DockerSandboxFactory = {
   layer: (
     imageName: string,
-    oauthToken: string,
-    ghToken: string,
+    env: Record<string, string>,
   ): Layer.Layer<SandboxFactory> =>
     Layer.succeed(SandboxFactory, {
       withSandbox: <A, E, R>(
@@ -26,7 +25,7 @@ export const DockerSandboxFactory = {
       ): Effect.Effect<A, E | DockerError, Exclude<R, Sandbox>> => {
         const containerName = `sandcastle-${randomUUID()}`;
         return Effect.acquireUseRelease(
-          startContainer(containerName, imageName, oauthToken, ghToken),
+          startContainer(containerName, imageName, env),
           () =>
             effect.pipe(
               Effect.provide(DockerSandbox.layer(containerName)),

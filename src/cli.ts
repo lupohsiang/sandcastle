@@ -18,7 +18,7 @@ import { AgentError, ConfigDirError, InitError } from "./errors.js";
 import { DockerSandboxFactory, SandboxFactory } from "./SandboxFactory.js";
 import { withSandboxLifecycle } from "./SandboxLifecycle.js";
 import { syncIn, syncOut } from "./SyncService.js";
-import { resolveTokens } from "./TokenResolver.js";
+import { resolveEnv } from "./EnvResolver.js";
 
 // --- Shared options ---
 
@@ -82,14 +82,32 @@ const initCommand = Command.make(
       });
       yield* Console.log("Config directory created.");
 
-      // Resolve tokens
-      const tokens = yield* Effect.tryPromise({
-        try: () => resolveTokens(cwd),
+      // Resolve env vars
+      const env = yield* Effect.tryPromise({
+        try: () => resolveEnv(cwd),
         catch: (e) =>
           new InitError({
             message: `${e instanceof Error ? e.message : e}`,
           }),
       });
+
+      // Temporary hardcoded validation (will be replaced by agent provider env check)
+      if (!env["CLAUDE_CODE_OAUTH_TOKEN"]) {
+        yield* Effect.fail(
+          new InitError({
+            message:
+              "CLAUDE_CODE_OAUTH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
+          }),
+        );
+      }
+      if (!env["GH_TOKEN"]) {
+        yield* Effect.fail(
+          new InitError({
+            message:
+              "GH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
+          }),
+        );
+      }
 
       // Build image from .sandcastle/ directory
       const dockerfileDir = join(cwd, CONFIG_DIR);
@@ -98,12 +116,7 @@ const initCommand = Command.make(
 
       // Start container
       yield* Console.log(`Starting container '${container}'...`);
-      yield* startContainer(
-        container,
-        imageName,
-        tokens.oauthToken,
-        tokens.ghToken,
-      );
+      yield* startContainer(container, imageName, env);
 
       yield* Console.log(`Init complete! Container '${container}' is running.`);
     }),
@@ -122,26 +135,39 @@ const setupSandboxCommand = Command.make(
       const cwd = process.cwd();
       yield* requireConfigDir(cwd);
 
-      // Resolve tokens
-      const tokens = yield* Effect.tryPromise({
-        try: () => resolveTokens(cwd),
+      // Resolve env vars
+      const env = yield* Effect.tryPromise({
+        try: () => resolveEnv(cwd),
         catch: (e) =>
           new InitError({
             message: `${e instanceof Error ? e.message : e}`,
           }),
       });
 
+      // Temporary hardcoded validation (will be replaced by agent provider env check)
+      if (!env["CLAUDE_CODE_OAUTH_TOKEN"]) {
+        yield* Effect.fail(
+          new InitError({
+            message:
+              "CLAUDE_CODE_OAUTH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
+          }),
+        );
+      }
+      if (!env["GH_TOKEN"]) {
+        yield* Effect.fail(
+          new InitError({
+            message:
+              "GH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
+          }),
+        );
+      }
+
       const dockerfileDir = join(cwd, CONFIG_DIR);
       yield* Console.log(`Building Docker image '${imageName}'...`);
       yield* buildImage(imageName, dockerfileDir);
 
       yield* Console.log(`Starting container '${container}'...`);
-      yield* startContainer(
-        container,
-        imageName,
-        tokens.oauthToken,
-        tokens.ghToken,
-      );
+      yield* startContainer(container, imageName, env);
 
       yield* Console.log(
         `Setup complete! Container '${container}' is running.`,
@@ -410,14 +436,32 @@ const interactiveCommand = Command.make(
       const repoName = hostRepoDir.split("/").pop()!;
       const sandboxRepoDir = `${SANDBOX_REPOS_DIR}/${repoName}`;
 
-      // Resolve auth tokens
-      const tokens = yield* Effect.tryPromise({
-        try: () => resolveTokens(hostRepoDir),
+      // Resolve env vars
+      const env = yield* Effect.tryPromise({
+        try: () => resolveEnv(hostRepoDir),
         catch: (e) =>
           new InitError({
             message: `${e instanceof Error ? e.message : e}`,
           }),
       });
+
+      // Temporary hardcoded validation (will be replaced by agent provider env check)
+      if (!env["CLAUDE_CODE_OAUTH_TOKEN"]) {
+        yield* Effect.fail(
+          new InitError({
+            message:
+              "CLAUDE_CODE_OAUTH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
+          }),
+        );
+      }
+      if (!env["GH_TOKEN"]) {
+        yield* Effect.fail(
+          new InitError({
+            message:
+              "GH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
+          }),
+        );
+      }
 
       const config = yield* readConfig(hostRepoDir);
       const resolvedModel = model._tag === "Some" ? model.value : undefined;
@@ -426,11 +470,7 @@ const interactiveCommand = Command.make(
       yield* Console.log(`Image: ${imageName}`);
       yield* Console.log("");
 
-      const factoryLayer = DockerSandboxFactory.layer(
-        imageName,
-        tokens.oauthToken,
-        tokens.ghToken,
-      );
+      const factoryLayer = DockerSandboxFactory.layer(imageName, env);
 
       yield* interactiveSession({
         hostRepoDir,
