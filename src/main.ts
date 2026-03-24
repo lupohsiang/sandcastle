@@ -1,6 +1,9 @@
 #!/usr/bin/env node
 import { NodeContext, NodeRuntime } from "@effect/platform-node";
-import { Effect } from "effect";
+import { Effect, Layer } from "effect";
 import { cli } from "./cli.js";
+import { ClackDisplay } from "./Display.js";
 
-cli(process.argv).pipe(Effect.provide(NodeContext.layer), NodeRuntime.runMain);
+const mainLayer = Layer.merge(NodeContext.layer, ClackDisplay.layer);
+
+cli(process.argv).pipe(Effect.provide(mainLayer), NodeRuntime.runMain);
