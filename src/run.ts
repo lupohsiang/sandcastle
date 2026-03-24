@@ -1,4 +1,5 @@
 import { Effect } from "effect";
+import { getAgentProvider } from "./AgentProvider.js";
 import { readConfig } from "./Config.js";
 import { orchestrate } from "./Orchestrator.js";
 import { resolvePrompt } from "./PromptResolver.js";
@@ -21,6 +22,8 @@ export interface RunOptions {
   readonly branch?: string;
   /** Model to use for the agent (default: claude-opus-4-6) */
   readonly model?: string;
+  /** Agent provider name (default: claude-code) */
+  readonly agent?: string;
   /** @internal */
   readonly _imageName?: string;
 }
@@ -40,6 +43,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     hooks,
     branch,
     model,
+    agent,
     _imageName = "sandcastle:local",
   } = options;
 
@@ -61,20 +65,13 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   // Resolve model: explicit option > config > default
   const resolvedModel = model ?? config.model;
 
-  // Resolve env vars and build Docker factory layer
-  const env = await resolveEnv(hostRepoDir);
+  // Resolve agent provider: explicit option > config > default
+  const agentName = agent ?? config.agent ?? "claude-code";
+  const provider = getAgentProvider(agentName);
 
-  // Temporary hardcoded validation (will be replaced by agent provider env check)
-  if (!env["CLAUDE_CODE_OAUTH_TOKEN"]) {
-    throw new Error(
-      "CLAUDE_CODE_OAUTH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
-    );
-  }
-  if (!env["GH_TOKEN"]) {
-    throw new Error(
-      "GH_TOKEN not found. Set it in .env, .sandcastle/.env, or as an environment variable.",
-    );
-  }
+  // Resolve env vars and run agent provider's env check
+  const env = await resolveEnv(hostRepoDir);
+  provider.envCheck(env);
 
   const factoryLayer = DockerSandboxFactory.layer(_imageName, env);
 
