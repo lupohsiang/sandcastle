@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { exec } from "node:child_process";
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -1199,5 +1199,172 @@ describe("hooks", () => {
 
     const content = await readFile(join(sandboxRepoDir, "order.txt"), "utf-8");
     expect(content.trim()).toBe("first\nsecond");
+  });
+});
+
+describe("patch artifacts", () => {
+  it("sync-out failure saves committed patches to .sandcastle/patches/<timestamp>/", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "shared.txt", "original", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Sandbox modifies shared.txt
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "sandbox version");
+    await execAsync("git add shared.txt", { cwd: sandboxRepoDir });
+    await execAsync('git commit -m "sandbox edit"', { cwd: sandboxRepoDir });
+
+    // Host also modifies shared.txt (creating a conflict)
+    await writeFile(join(hostDir, "shared.txt"), "host version");
+    await execAsync("git add shared.txt", { cwd: hostDir });
+    await execAsync('git commit -m "host edit"', { cwd: hostDir });
+
+    // syncOut should fail
+    await expect(
+      Effect.runPromise(
+        syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+      ),
+    ).rejects.toThrow();
+
+    // Patch directory should exist with committed patches
+    const patchesDir = join(hostDir, ".sandcastle", "patches");
+    const timestamps = await readdir(patchesDir);
+    expect(timestamps).toHaveLength(1);
+    expect(timestamps[0]).toMatch(/^\d{8}-\d{6}$/);
+
+    const patchDir = join(patchesDir, timestamps[0]!);
+    const files = await readdir(patchDir);
+    const patchFiles = files.filter(
+      (f) => f.endsWith(".patch") && f !== "changes.patch",
+    );
+    expect(patchFiles.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("sync-out success cleans up the patch directory", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "initial.txt", "initial", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+    await commitFile(sandboxRepoDir, "new.txt", "new", "sandbox commit");
+
+    await Effect.runPromise(
+      syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+    );
+
+    // Timestamped directory should be cleaned up on success
+    const patchesDir = join(hostDir, ".sandcastle", "patches");
+    const timestamps = await readdir(patchesDir);
+    expect(timestamps).toHaveLength(0);
+  });
+
+  it("sync-out failure persists all artifact types", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "shared.txt", "original", "initial commit");
+
+    const baseHead = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+
+    // Sandbox makes a commit
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "sandbox version");
+    await execAsync("git add shared.txt", { cwd: sandboxRepoDir });
+    await execAsync('git commit -m "sandbox edit"', { cwd: sandboxRepoDir });
+
+    // Sandbox makes uncommitted changes
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "uncommitted change");
+
+    // Sandbox creates untracked files
+    await writeFile(join(sandboxRepoDir, "untracked.txt"), "untracked content");
+
+    // Host creates a conflict
+    await writeFile(join(hostDir, "shared.txt"), "host version");
+    await execAsync("git add shared.txt", { cwd: hostDir });
+    await execAsync('git commit -m "host edit"', { cwd: hostDir });
+
+    // syncOut should fail
+    await expect(
+      Effect.runPromise(
+        syncOut(hostDir, sandboxRepoDir, baseHead).pipe(Effect.provide(layer)),
+      ),
+    ).rejects.toThrow();
+
+    // Check all artifact types are saved
+    const patchesDir = join(hostDir, ".sandcastle", "patches");
+    const timestamps = await readdir(patchesDir);
+    expect(timestamps).toHaveLength(1);
+
+    const patchDir = join(patchesDir, timestamps[0]!);
+    const files = await readdir(patchDir);
+
+    // Committed patches (numbered .patch files)
+    const commitPatches = files.filter(
+      (f) => f.endsWith(".patch") && f !== "changes.patch",
+    );
+    expect(commitPatches.length).toBeGreaterThanOrEqual(1);
+
+    // Uncommitted diff
+    expect(files).toContain("changes.patch");
+
+    // Untracked files directory
+    expect(files).toContain("untracked");
+    const untrackedFiles = await readdir(join(patchDir, "untracked"));
+    expect(untrackedFiles).toContain("untracked.txt");
+    const untrackedContent = await readFile(
+      join(patchDir, "untracked", "untracked.txt"),
+      "utf-8",
+    );
+    expect(untrackedContent).toBe("untracked content");
+  });
+
+  it("previous failed run's patches are not affected by new sync-out", async () => {
+    const { hostDir, sandboxRepoDir, layer } = await setup();
+    await initRepo(hostDir);
+    await commitFile(hostDir, "shared.txt", "original", "initial commit");
+
+    // --- First run: create a conflict to fail ---
+    const baseHead1 = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+
+    await writeFile(join(sandboxRepoDir, "shared.txt"), "sandbox v1");
+    await execAsync("git add shared.txt", { cwd: sandboxRepoDir });
+    await execAsync('git commit -m "sandbox edit v1"', { cwd: sandboxRepoDir });
+
+    await writeFile(join(hostDir, "shared.txt"), "host v1");
+    await execAsync("git add shared.txt", { cwd: hostDir });
+    await execAsync('git commit -m "host edit v1"', { cwd: hostDir });
+
+    await expect(
+      Effect.runPromise(
+        syncOut(hostDir, sandboxRepoDir, baseHead1).pipe(Effect.provide(layer)),
+      ),
+    ).rejects.toThrow();
+
+    // Capture first run's patch dir
+    const patchesDir = join(hostDir, ".sandcastle", "patches");
+    const firstTimestamps = await readdir(patchesDir);
+    expect(firstTimestamps).toHaveLength(1);
+    const firstPatchDir = firstTimestamps[0]!;
+
+    // --- Second run: successful sync-out ---
+    // Reset host to allow clean application
+    await execAsync("git reset --hard HEAD~1", { cwd: hostDir });
+    const baseHead2 = await syncInAndGetBase(hostDir, sandboxRepoDir, layer);
+    await initSandboxGit(sandboxRepoDir);
+    await commitFile(sandboxRepoDir, "new.txt", "new content", "new commit");
+
+    await Effect.runPromise(
+      syncOut(hostDir, sandboxRepoDir, baseHead2).pipe(Effect.provide(layer)),
+    );
+
+    // First run's patch dir should still exist
+    const allTimestamps = await readdir(patchesDir);
+    expect(allTimestamps).toContain(firstPatchDir);
+
+    // Second run cleaned up its own dir, so only the first one remains
+    expect(allTimestamps).toHaveLength(1);
   });
 });

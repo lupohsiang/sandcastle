@@ -1,6 +1,6 @@
 import { Effect } from "effect";
 import { execFile } from "node:child_process";
-import { mkdtemp, readdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, mkdtemp, readdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { HookDefinition } from "./Config.js";
@@ -267,51 +267,113 @@ export const syncOut = (
     }
   });
 
-/** Apply patches directly to the host's current branch (existing behavior) */
-const syncOutDirect = (
+/** Format a timestamp as YYYYMMDD-HHMMSS */
+const formatTimestamp = (date: Date): string => {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${date.getFullYear()}${pad(date.getMonth() + 1)}${pad(date.getDate())}-` +
+    `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`
+  );
+};
+
+/** Create a unique timestamped directory under .sandcastle/patches/ */
+const createPatchDir = async (hostRepoDir: string): Promise<string> => {
+  const base = formatTimestamp(new Date());
+  const patchesDir = join(hostRepoDir, ".sandcastle", "patches");
+  await mkdir(patchesDir, { recursive: true });
+
+  // Ensure uniqueness by appending a counter if the dir already exists
+  let dir = join(patchesDir, base);
+  let counter = 0;
+  while (true) {
+    try {
+      await mkdir(dir);
+      return dir;
+    } catch (e: unknown) {
+      if ((e as NodeJS.ErrnoException).code === "EEXIST") {
+        counter++;
+        dir = join(patchesDir, `${base}-${counter}`);
+      } else {
+        throw e;
+      }
+    }
+  }
+};
+
+/** Eagerly save all patch artifacts to .sandcastle/patches/<timestamp>/ */
+const saveArtifacts = (
   sandbox: SandboxService,
   hostRepoDir: string,
   sandboxRepoDir: string,
   baseHead: string,
-): Effect.Effect<void, SandboxError> =>
+): Effect.Effect<
+  {
+    patchDir: string;
+    hasCommits: boolean;
+    hasDiff: boolean;
+    hasUntracked: boolean;
+  },
+  SandboxError
+> =>
   Effect.gen(function* () {
-    // --- 1. Sync commits via format-patch / git am ---
+    const patchDir = yield* Effect.promise(() => createPatchDir(hostRepoDir));
+
+    let hasCommits = false;
+    let hasDiff = false;
+    let hasUntracked = false;
+
+    // --- 1. Save committed patches ---
     const sandboxHead = (yield* execOk(sandbox, "git rev-parse HEAD", {
       cwd: sandboxRepoDir,
     })).stdout.trim();
 
     if (sandboxHead !== baseHead) {
-      yield* applyPatches(sandbox, hostRepoDir, sandboxRepoDir, baseHead);
+      const countResult = yield* execOk(
+        sandbox,
+        `git rev-list "${baseHead}..HEAD" --count`,
+        { cwd: sandboxRepoDir },
+      );
+      const commitCount = parseInt(countResult.stdout.trim(), 10);
+
+      if (commitCount > 0) {
+        hasCommits = true;
+        const hostPatchDir = yield* generateAndCopyPatches(
+          sandbox,
+          sandboxRepoDir,
+          baseHead,
+        );
+        // Move patch files into the persistent directory
+        const patchFiles = (yield* Effect.promise(() =>
+          readdir(hostPatchDir),
+        )).filter((f) => f.endsWith(".patch"));
+        for (const file of patchFiles) {
+          yield* Effect.promise(() =>
+            copyFile(join(hostPatchDir, file), join(patchDir, file)),
+          );
+        }
+        yield* Effect.promise(() => rm(hostPatchDir, { recursive: true }));
+      }
     }
 
-    // --- 2. Sync uncommitted changes ---
-
-    // Staged + unstaged changes via git diff HEAD
+    // --- 2. Save uncommitted diff ---
     const diffCheck = yield* sandbox.exec("git diff HEAD --quiet", {
       cwd: sandboxRepoDir,
     });
     if (diffCheck.exitCode !== 0) {
+      hasDiff = true;
       const sandboxDiffDir = (yield* execOk(
         sandbox,
         "mktemp -d -t sandcastle-diff-XXXXXX",
       )).stdout.trim();
       const sandboxDiffFile = `${sandboxDiffDir}/changes.patch`;
-      const hostDiffDir = yield* Effect.promise(() =>
-        mkdtemp(join(tmpdir(), "sandcastle-diff-")),
-      );
-      const hostDiffFile = join(hostDiffDir, "changes.patch");
-
       yield* execOk(sandbox, `git diff HEAD > "${sandboxDiffFile}"`, {
         cwd: sandboxRepoDir,
       });
-      yield* sandbox.copyOut(sandboxDiffFile, hostDiffFile);
-      yield* execHost(`git apply "${hostDiffFile}"`, hostRepoDir);
-
+      yield* sandbox.copyOut(sandboxDiffFile, join(patchDir, "changes.patch"));
       yield* sandbox.exec(`rm -rf "${sandboxDiffDir}"`);
-      yield* Effect.promise(() => rm(hostDiffDir, { recursive: true }));
     }
 
-    // Untracked files
+    // --- 3. Save untracked files ---
     const untrackedResult = yield* sandbox.exec(
       "git ls-files --others --exclude-standard",
       { cwd: sandboxRepoDir },
@@ -325,12 +387,105 @@ const syncOutDirect = (
         .split("\n")
         .filter((f) => f.length > 0);
 
-      for (const file of untrackedFiles) {
-        const sandboxFilePath = `${sandboxRepoDir}/${file}`;
-        const hostFilePath = join(hostRepoDir, file);
-        yield* sandbox.copyOut(sandboxFilePath, hostFilePath);
+      if (untrackedFiles.length > 0) {
+        hasUntracked = true;
+        const untrackedDir = join(patchDir, "untracked");
+        yield* Effect.promise(() => mkdir(untrackedDir, { recursive: true }));
+
+        for (const file of untrackedFiles) {
+          const destPath = join(untrackedDir, file);
+          const destDir = join(
+            untrackedDir,
+            file.split("/").slice(0, -1).join("/"),
+          );
+          if (destDir !== untrackedDir) {
+            yield* Effect.promise(() => mkdir(destDir, { recursive: true }));
+          }
+          yield* sandbox.copyOut(`${sandboxRepoDir}/${file}`, destPath);
+        }
       }
     }
+
+    return { patchDir, hasCommits, hasDiff, hasUntracked };
+  });
+
+/** Apply patches directly to the host's current branch (existing behavior) */
+const syncOutDirect = (
+  sandbox: SandboxService,
+  hostRepoDir: string,
+  sandboxRepoDir: string,
+  baseHead: string,
+): Effect.Effect<void, SandboxError> =>
+  Effect.gen(function* () {
+    const sandboxHead = (yield* execOk(sandbox, "git rev-parse HEAD", {
+      cwd: sandboxRepoDir,
+    })).stdout.trim();
+
+    // Check if there's anything to do
+    const diffCheck = yield* sandbox.exec("git diff HEAD --quiet", {
+      cwd: sandboxRepoDir,
+    });
+    const untrackedResult = yield* sandbox.exec(
+      "git ls-files --others --exclude-standard",
+      { cwd: sandboxRepoDir },
+    );
+    const hasAnyChanges =
+      sandboxHead !== baseHead ||
+      diffCheck.exitCode !== 0 ||
+      (untrackedResult.exitCode === 0 &&
+        untrackedResult.stdout.trim().length > 0);
+
+    if (!hasAnyChanges) return;
+
+    // Phase 1: Eagerly save all artifacts
+    const { patchDir, hasCommits, hasDiff, hasUntracked } =
+      yield* saveArtifacts(sandbox, hostRepoDir, sandboxRepoDir, baseHead);
+
+    // Phase 2: Apply from the saved directory
+    const applyEffect = Effect.gen(function* () {
+      // Apply committed patches
+      if (hasCommits) {
+        const patchFiles = (yield* Effect.promise(() => readdir(patchDir)))
+          .filter((f) => f.endsWith(".patch") && f !== "changes.patch")
+          .sort();
+
+        // Abort any leftover git am session
+        yield* Effect.ignore(execHost("git am --abort", hostRepoDir));
+
+        for (const file of patchFiles) {
+          yield* execHost(
+            `git am --3way "${join(patchDir, file)}"`,
+            hostRepoDir,
+          );
+        }
+      }
+
+      // Apply uncommitted diff
+      if (hasDiff) {
+        yield* execHost(
+          `git apply "${join(patchDir, "changes.patch")}"`,
+          hostRepoDir,
+        );
+      }
+
+      // Copy untracked files
+      if (hasUntracked) {
+        const untrackedDir = join(patchDir, "untracked");
+        const files = yield* Effect.promise(() => readdir(untrackedDir));
+        for (const file of files) {
+          const src = join(untrackedDir, file);
+          const dest = join(hostRepoDir, file);
+          yield* Effect.promise(() => copyFile(src, dest));
+        }
+      }
+    });
+
+    // On success, clean up the patch directory. On failure, leave it.
+    yield* Effect.matchEffect(applyEffect, {
+      onSuccess: () =>
+        Effect.promise(() => rm(patchDir, { recursive: true, force: true })),
+      onFailure: (error) => Effect.fail(error),
+    });
   });
 
 /** Apply committed patches to a target branch via a temporary git worktree */
