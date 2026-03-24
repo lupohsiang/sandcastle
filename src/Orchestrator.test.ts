@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 import { FilesystemSandbox } from "./FilesystemSandbox.js";
 import {
+  DEFAULT_MODEL,
   orchestrate,
   parseStreamJsonLine,
   type OrchestrateOptions,
@@ -825,6 +826,120 @@ describe("Orchestrator streaming", () => {
 
     expect(result.iterationsRun).toBe(1);
     expect(result.complete).toBe(true);
+  });
+
+  it("uses DEFAULT_MODEL when no model is specified", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-defmodel-host-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let capturedCommand = "";
+
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory((dir) => {
+      const fsLayer = FilesystemSandbox.layer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) =>
+          Effect.flatMap(Sandbox, (real) => real.exec(command, options)).pipe(
+            Effect.provide(fsLayer),
+          ),
+        execStreaming: (command, onStdoutLine, options) => {
+          if (command.startsWith("claude ")) {
+            capturedCommand = command;
+            const output = "Done.";
+            const streamOutput = toStreamJson(output);
+            for (const line of streamOutput.split("\n")) {
+              onStdoutLine(line);
+            }
+            return Effect.succeed({
+              stdout: streamOutput,
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.execStreaming(command, onStdoutLine, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    await Effect.runPromise(
+      orchestrate({
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 1,
+        prompt: "do some work",
+      }).pipe(Effect.provide(factoryLayer)),
+    );
+
+    expect(capturedCommand).toContain(`--model ${DEFAULT_MODEL}`);
+  });
+
+  it("uses custom model when specified in options", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-custmodel-host-"));
+
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let capturedCommand = "";
+
+    const { factoryLayer, sandboxRepoDir } = makeTestSandboxFactory((dir) => {
+      const fsLayer = FilesystemSandbox.layer(dir);
+      return Layer.succeed(Sandbox, {
+        exec: (command, options) =>
+          Effect.flatMap(Sandbox, (real) => real.exec(command, options)).pipe(
+            Effect.provide(fsLayer),
+          ),
+        execStreaming: (command, onStdoutLine, options) => {
+          if (command.startsWith("claude ")) {
+            capturedCommand = command;
+            const output = "Done.";
+            const streamOutput = toStreamJson(output);
+            for (const line of streamOutput.split("\n")) {
+              onStdoutLine(line);
+            }
+            return Effect.succeed({
+              stdout: streamOutput,
+              stderr: "",
+              exitCode: 0,
+            });
+          }
+          return Effect.flatMap(Sandbox, (real) =>
+            real.execStreaming(command, onStdoutLine, options),
+          ).pipe(Effect.provide(fsLayer));
+        },
+        copyIn: (hostPath, sandboxPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyIn(hostPath, sandboxPath),
+          ).pipe(Effect.provide(fsLayer)),
+        copyOut: (sandboxPath, hostPath) =>
+          Effect.flatMap(Sandbox, (real) =>
+            real.copyOut(sandboxPath, hostPath),
+          ).pipe(Effect.provide(fsLayer)),
+      });
+    });
+
+    await Effect.runPromise(
+      orchestrate({
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 1,
+        prompt: "do some work",
+        model: "claude-sonnet-4-6",
+      }).pipe(Effect.provide(factoryLayer)),
+    );
+
+    expect(capturedCommand).toContain("--model claude-sonnet-4-6");
+    expect(capturedCommand).not.toContain(DEFAULT_MODEL);
   });
 });
 

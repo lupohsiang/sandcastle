@@ -87,12 +87,14 @@ Rebuilds the Docker image and restarts a container from an existing `.sandcastle
 
 Runs the orchestration loop: sync-in, invoke agent, sync-out, repeat.
 
-| Option          | Required | Default                 | Description                       |
-| --------------- | -------- | ----------------------- | --------------------------------- |
-| `--iterations`  | No       | `5`                     | Number of agent iterations to run |
-| `--container`   | No       | `claude-sandbox`        | Docker container name             |
-| `--image-name`  | No       | `sandcastle:local`      | Docker image name                 |
-| `--prompt-file` | No       | `.sandcastle/prompt.md` | Path to the agent prompt file     |
+| Option          | Required | Default                 | Description                                                  |
+| --------------- | -------- | ----------------------- | ------------------------------------------------------------ |
+| `--iterations`  | No       | `5`                     | Number of agent iterations to run                            |
+| `--image-name`  | No       | `sandcastle:local`      | Docker image name                                            |
+| `--prompt`      | No       | —                       | Inline prompt string (mutually exclusive with --prompt-file) |
+| `--prompt-file` | No       | `.sandcastle/prompt.md` | Path to the agent prompt file                                |
+| `--branch`      | No       | —                       | Target branch name for sandbox work                          |
+| `--model`       | No       | `claude-opus-4-6`       | Model to use for the agent                                   |
 
 The agent runs inside the container, working on open GitHub issues. Each iteration:
 
@@ -106,9 +108,10 @@ The agent runs inside the container, working on open GitHub issues. Each iterati
 
 Opens an interactive Claude Code session inside the sandbox. Syncs your repo in, launches Claude with TTY passthrough, and syncs changes back when you exit.
 
-| Option        | Required | Default          | Description           |
-| ------------- | -------- | ---------------- | --------------------- |
-| `--container` | No       | `claude-sandbox` | Docker container name |
+| Option         | Required | Default            | Description                |
+| -------------- | -------- | ------------------ | -------------------------- |
+| `--image-name` | No       | `sandcastle:local` | Docker image name          |
+| `--model`      | No       | `claude-opus-4-6`  | Model to use for the agent |
 
 ### `sandcastle cleanup-sandbox`
 
@@ -177,14 +180,16 @@ Place a `.sandcastle/config.json` file to configure advanced behavior:
     ],
     "onSandboxReady": [{ "command": "npm install" }]
   },
-  "defaultIterations": 10
+  "defaultMaxIterations": 10,
+  "model": "claude-sonnet-4-6"
 }
 ```
 
-| Field               | Type   | Description                                                                                                                 |
-| ------------------- | ------ | --------------------------------------------------------------------------------------------------------------------------- |
-| `hooks`             | object | Lifecycle hooks that run commands inside the sandbox. See below.                                                            |
-| `defaultIterations` | number | Default number of agent iterations for `sandcastle run`. Overridden by the `--iterations` CLI flag. Defaults to 5 if unset. |
+| Field                  | Type   | Description                                                                                                                  |
+| ---------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| `hooks`                | object | Lifecycle hooks that run commands inside the sandbox. See below.                                                             |
+| `defaultMaxIterations` | number | Default number of agent iterations for `sandcastle run`. Overridden by the `--iterations` CLI flag. Defaults to 5 if unset.  |
+| `model`                | string | Default model for the agent (e.g. `claude-sonnet-4-6`). Overridden by the `--model` CLI flag. Defaults to `claude-opus-4-6`. |
 
 ### Hooks
 

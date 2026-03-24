@@ -79,13 +79,14 @@ const invokeAgent = (
   sandbox: SandboxService,
   sandboxRepoDir: string,
   prompt: string,
+  model: string,
 ): Effect.Effect<{ result: string; usage: TokenUsage | null }, SandboxError> =>
   Effect.gen(function* () {
     let resultText = "";
     let tokenUsage: TokenUsage | null = null;
 
     const execResult = yield* sandbox.execStreaming(
-      `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model ${DEFAULT_MODEL} -p ${shellEscape(prompt)}`,
+      `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model ${model} -p ${shellEscape(prompt)}`,
       (line) => {
         const parsed = parseStreamJsonLine(line);
         if (parsed?.type === "text") {
@@ -140,6 +141,7 @@ export interface OrchestrateOptions {
   readonly config?: SandcastleConfig;
   readonly prompt: string;
   readonly branch?: string;
+  readonly model?: string;
 }
 
 export interface OrchestrateResult {
@@ -154,6 +156,7 @@ export const orchestrate = (
     const factory = yield* SandboxFactory;
     const { hostRepoDir, sandboxRepoDir, iterations, config, prompt, branch } =
       options;
+    const resolvedModel = options.model ?? DEFAULT_MODEL;
 
     for (let i = 1; i <= iterations; i++) {
       yield* Console.log(`\n=== Iteration ${i}/${iterations} ===\n`);
@@ -176,11 +179,12 @@ export const orchestrate = (
                 ctx.sandbox,
                 ctx.sandboxRepoDir,
                 fullPrompt,
+                resolvedModel,
               );
 
               // Log usage summary
               if (usage) {
-                yield* Console.log(formatUsageLine(usage, DEFAULT_MODEL));
+                yield* Console.log(formatUsageLine(usage, resolvedModel));
               }
 
               // Check completion signal

@@ -251,6 +251,13 @@ const branchOption = Options.text("branch").pipe(
   Options.optional,
 );
 
+const modelOption = Options.text("model").pipe(
+  Options.withDescription(
+    "Model to use for the agent (e.g. claude-sonnet-4-6)",
+  ),
+  Options.optional,
+);
+
 const runCommand = Command.make(
   "run",
   {
@@ -259,8 +266,9 @@ const runCommand = Command.make(
     prompt: promptOption,
     promptFile: promptFileOption,
     branch: branchOption,
+    model: modelOption,
   },
-  ({ iterations, imageName, prompt, promptFile, branch }) =>
+  ({ iterations, imageName, prompt, promptFile, branch, model }) =>
     Effect.gen(function* () {
       const hostRepoDir = process.cwd();
       yield* requireConfigDir(hostRepoDir);
@@ -273,12 +281,16 @@ const runCommand = Command.make(
           : (config.defaultMaxIterations ?? 5);
 
       const resolvedBranch = branch._tag === "Some" ? branch.value : undefined;
+      const resolvedModel = model._tag === "Some" ? model.value : undefined;
 
       yield* Console.log(`=== SANDCASTLE RUN ===`);
       yield* Console.log(`Image:      ${imageName}`);
       yield* Console.log(`Iterations: ${resolvedIterations}`);
       if (resolvedBranch) {
         yield* Console.log(`Branch:     ${resolvedBranch}`);
+      }
+      if (resolvedModel) {
+        yield* Console.log(`Model:      ${resolvedModel}`);
       }
       yield* Console.log(``);
 
@@ -292,6 +304,7 @@ const runCommand = Command.make(
                 : undefined,
             maxIterations: resolvedIterations,
             branch: resolvedBranch,
+            model: resolvedModel,
             _imageName: imageName,
           }),
         catch: (e) =>
@@ -316,9 +329,11 @@ const interactiveSession = (options: {
   hostRepoDir: string;
   sandboxRepoDir: string;
   config: import("./Config.js").SandcastleConfig;
+  model?: string;
 }): Effect.Effect<void, SandboxError, SandboxFactory> =>
   Effect.gen(function* () {
     const { hostRepoDir, sandboxRepoDir, config } = options;
+    const resolvedModel = options.model ?? config.model ?? DEFAULT_MODEL;
     const factory = yield* SandboxFactory;
 
     yield* factory.withSandbox(
@@ -347,7 +362,7 @@ const interactiveSession = (options: {
                     "claude",
                     "--dangerously-skip-permissions",
                     "--model",
-                    DEFAULT_MODEL,
+                    resolvedModel,
                   ],
                   { stdio: "inherit" },
                 );
@@ -382,8 +397,9 @@ const interactiveCommand = Command.make(
   "interactive",
   {
     imageName: imageNameOption,
+    model: modelOption,
   },
-  ({ imageName }) =>
+  ({ imageName, model }) =>
     Effect.gen(function* () {
       const hostRepoDir = process.cwd();
       yield* requireConfigDir(hostRepoDir);
@@ -402,6 +418,7 @@ const interactiveCommand = Command.make(
       });
 
       const config = yield* readConfig(hostRepoDir);
+      const resolvedModel = model._tag === "Some" ? model.value : undefined;
 
       yield* Console.log("=== SANDCASTLE (Interactive) ===");
       yield* Console.log(`Image: ${imageName}`);
@@ -417,6 +434,7 @@ const interactiveCommand = Command.make(
         hostRepoDir,
         sandboxRepoDir,
         config,
+        model: resolvedModel,
       }).pipe(Effect.provide(factoryLayer));
     }),
 );

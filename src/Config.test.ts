@@ -92,6 +92,22 @@ describe("readConfig", () => {
     expect(message).toContain("timeout");
   });
 
+  it("reads model from config", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
+    await setupConfigDir(repoDir, { model: "claude-sonnet-4-6" });
+
+    const config = await Effect.runPromise(readConfig(repoDir));
+    expect(config.model).toBe("claude-sonnet-4-6");
+  });
+
+  it("returns undefined for model when not set", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
+    await setupConfigDir(repoDir, {});
+
+    const config = await Effect.runPromise(readConfig(repoDir));
+    expect(config.model).toBeUndefined();
+  });
+
   it("accepts valid hooks config", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
     await setupConfigDir(repoDir, {

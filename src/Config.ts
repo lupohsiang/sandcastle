@@ -14,6 +14,7 @@ const SandcastleConfigSchema = Schema.Struct({
     }),
   ),
   defaultMaxIterations: Schema.optional(Schema.Number),
+  model: Schema.optional(Schema.String),
 }).annotations({ title: "SandcastleConfig" });
 
 export type HookDefinition = typeof HookDefinition.Type;

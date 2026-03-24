@@ -19,6 +19,8 @@ export interface RunOptions {
   };
   /** Target branch name for sandbox work */
   readonly branch?: string;
+  /** Model to use for the agent (default: claude-opus-4-6) */
+  readonly model?: string;
   /** @internal */
   readonly _imageName?: string;
 }
@@ -37,6 +39,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     maxIterations = 5,
     hooks,
     branch,
+    model,
     _imageName = "sandcastle:local",
   } = options;
 
@@ -55,6 +58,9 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   // Merge hooks: explicit hooks override config hooks
   const resolvedConfig = hooks ? { ...config, hooks } : config;
 
+  // Resolve model: explicit option > config > default
+  const resolvedModel = model ?? config.model;
+
   // Resolve tokens and build Docker factory layer
   const tokens = await resolveTokens(hostRepoDir);
   const factoryLayer = DockerSandboxFactory.layer(
@@ -71,6 +77,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       config: resolvedConfig,
       prompt: resolvedPrompt,
       branch,
+      model: resolvedModel,
     }).pipe(Effect.provide(factoryLayer)),
   );
 
