@@ -33,29 +33,16 @@ describe("sandcastle CLI", () => {
   it("shows help with --help flag", async () => {
     const { stdout } = await runCli("--help", process.cwd());
     expect(stdout).toContain("sandcastle");
-    expect(stdout).toContain("setup-sandbox");
-    expect(stdout).toContain("cleanup-sandbox");
+    expect(stdout).toContain("build-image");
+    expect(stdout).toContain("remove-image");
     expect(stdout).toContain("init");
     expect(stdout).toContain("run");
     expect(stdout).toContain("interactive");
-    // sync-in and sync-out should not be exposed as CLI commands
+    // Old command names should not be exposed
+    expect(stdout).not.toContain("setup-sandbox");
+    expect(stdout).not.toContain("cleanup-sandbox");
     expect(stdout).not.toContain("sync-in");
     expect(stdout).not.toContain("sync-out");
-  });
-
-  it("setup-sandbox and cleanup-sandbox replace old setup/cleanup names", async () => {
-    const { stdout } = await runCli("--help", process.cwd());
-    // New names present
-    expect(stdout).toContain("setup-sandbox");
-    expect(stdout).toContain("cleanup-sandbox");
-    // Old names should not appear as standalone commands
-    // (they may appear as substrings of the new names, so check that
-    // "setup" only appears in the context of "setup-sandbox")
-    const lines = stdout.split("\n");
-    const setupLines = lines.filter(
-      (l: string) => l.includes("setup") && !l.includes("setup-sandbox"),
-    );
-    expect(setupLines.length).toBe(0);
   });
 
   it("run command errors when .sandcastle/ is missing", async () => {

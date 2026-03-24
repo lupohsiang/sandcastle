@@ -5,11 +5,7 @@ import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { readConfig } from "./Config.js";
 import { DEFAULT_MODEL } from "./Orchestrator.js";
-import {
-  buildImage,
-  cleanupContainer,
-  startContainer,
-} from "./DockerLifecycle.js";
+import { buildImage, removeImage } from "./DockerLifecycle.js";
 import { scaffold } from "./InitService.js";
 import { run } from "./run.js";
 import { getAgentProvider } from "./AgentProvider.js";
@@ -19,11 +15,6 @@ import { withSandboxLifecycle } from "./SandboxLifecycle.js";
 import { resolveEnv } from "./EnvResolver.js";
 
 // --- Shared options ---
-
-const containerOption = Options.text("container").pipe(
-  Options.withDescription("Docker container name"),
-  Options.withDefault("claude-sandbox"),
-);
 
 const imageNameOption = Options.text("image-name").pipe(
   Options.withDescription("Docker image name"),
@@ -53,11 +44,10 @@ const requireConfigDir = (cwd: string): Effect.Effect<void, ConfigDirError> =>
 const initCommand = Command.make(
   "init",
   {
-    container: containerOption,
     imageName: imageNameOption,
     agent: agentOption,
   },
-  ({ container, imageName, agent }) =>
+  ({ imageName, agent }) =>
     Effect.gen(function* () {
       const cwd = process.cwd();
 
@@ -81,105 +71,47 @@ const initCommand = Command.make(
       });
       yield* Console.log("Config directory created.");
 
-      // Resolve env vars and run agent provider's env check
-      const env = yield* Effect.tryPromise({
-        try: () => resolveEnv(cwd),
-        catch: (e) =>
-          new InitError({
-            message: `${e instanceof Error ? e.message : e}`,
-          }),
-      });
-
-      yield* Effect.try({
-        try: () => provider.envCheck(env),
-        catch: (e) =>
-          new InitError({
-            message: `${e instanceof Error ? e.message : e}`,
-          }),
-      });
-
       // Build image from .sandcastle/ directory
       const dockerfileDir = join(cwd, CONFIG_DIR);
       yield* Console.log(`Building Docker image '${imageName}'...`);
       yield* buildImage(imageName, dockerfileDir);
 
-      // Start container
-      yield* Console.log(`Starting container '${container}'...`);
-      yield* startContainer(container, imageName, env);
-
-      yield* Console.log(`Init complete! Container '${container}' is running.`);
+      yield* Console.log("Init complete! Image built successfully.");
     }),
 );
 
-// --- Setup-sandbox command ---
+// --- Build-image command ---
 
-const setupSandboxCommand = Command.make(
-  "setup-sandbox",
+const buildImageCommand = Command.make(
+  "build-image",
   {
-    container: containerOption,
     imageName: imageNameOption,
-    agent: agentOption,
   },
-  ({ container, imageName, agent }) =>
+  ({ imageName }) =>
     Effect.gen(function* () {
       const cwd = process.cwd();
       yield* requireConfigDir(cwd);
-
-      // Resolve agent provider: CLI flag > config > default
-      const config = yield* readConfig(cwd);
-      const agentName =
-        agent._tag === "Some" ? agent.value : (config.agent ?? "claude-code");
-      const provider = yield* Effect.try({
-        try: () => getAgentProvider(agentName),
-        catch: (e) =>
-          new InitError({
-            message: `${e instanceof Error ? e.message : e}`,
-          }),
-      });
-
-      // Resolve env vars and run agent provider's env check
-      const env = yield* Effect.tryPromise({
-        try: () => resolveEnv(cwd),
-        catch: (e) =>
-          new InitError({
-            message: `${e instanceof Error ? e.message : e}`,
-          }),
-      });
-
-      yield* Effect.try({
-        try: () => provider.envCheck(env),
-        catch: (e) =>
-          new InitError({
-            message: `${e instanceof Error ? e.message : e}`,
-          }),
-      });
 
       const dockerfileDir = join(cwd, CONFIG_DIR);
       yield* Console.log(`Building Docker image '${imageName}'...`);
       yield* buildImage(imageName, dockerfileDir);
 
-      yield* Console.log(`Starting container '${container}'...`);
-      yield* startContainer(container, imageName, env);
-
-      yield* Console.log(
-        `Setup complete! Container '${container}' is running.`,
-      );
+      yield* Console.log("Build complete!");
     }),
 );
 
-// --- Cleanup-sandbox command ---
+// --- Remove-image command ---
 
-const cleanupSandboxCommand = Command.make(
-  "cleanup-sandbox",
+const removeImageCommand = Command.make(
+  "remove-image",
   {
-    container: containerOption,
     imageName: imageNameOption,
   },
-  ({ container, imageName }) =>
+  ({ imageName }) =>
     Effect.gen(function* () {
-      yield* Console.log(`Cleaning up container '${container}'...`);
-      yield* cleanupContainer(container, imageName);
-      yield* Console.log("Cleanup complete.");
+      yield* Console.log(`Removing Docker image '${imageName}'...`);
+      yield* removeImage(imageName);
+      yield* Console.log("Image removed.");
     }),
 );
 
@@ -426,8 +358,8 @@ const rootCommand = Command.make("sandcastle", {}, () =>
 export const sandcastle = rootCommand.pipe(
   Command.withSubcommands([
     initCommand,
-    setupSandboxCommand,
-    cleanupSandboxCommand,
+    buildImageCommand,
+    removeImageCommand,
     runCommand,
     interactiveCommand,
   ]),

@@ -92,17 +92,11 @@ export const removeContainer = (
   });
 
 /**
- * Stop and remove the container and image.
+ * Remove a Docker image.
  */
-export const cleanupContainer = (
-  containerName: string,
+export const removeImage = (
   imageName: string,
 ): Effect.Effect<void, DockerError> =>
   Effect.gen(function* () {
-    // Stop container (ignore errors if already stopped)
-    yield* Effect.ignore(dockerExec(["stop", containerName]));
-    // Remove container (ignore errors if not found)
-    yield* Effect.ignore(dockerExec(["rm", containerName]));
-    // Remove image (ignore errors if not found)
-    yield* Effect.ignore(dockerExec(["rmi", imageName]));
+    yield* dockerExec(["rmi", imageName]);
   });
