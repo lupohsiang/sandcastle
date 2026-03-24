@@ -1,9 +1,10 @@
 import { Command, Options } from "@effect/cli";
-import { Console, Effect } from "effect";
+import { Effect } from "effect";
 import { spawn } from "node:child_process";
 import { access } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { readConfig } from "./Config.js";
+import { Display } from "./Display.js";
 import { DEFAULT_MODEL } from "./Orchestrator.js";
 import { buildImage, removeImage } from "./DockerLifecycle.js";
 import { scaffold } from "./InitService.js";
@@ -49,6 +50,7 @@ const initCommand = Command.make(
   },
   ({ imageName, agent }) =>
     Effect.gen(function* () {
+      const d = yield* Display;
       const cwd = process.cwd();
 
       // Resolve agent provider: CLI flag > default
@@ -61,22 +63,25 @@ const initCommand = Command.make(
           }),
       });
 
-      yield* Console.log("Scaffolding .sandcastle/ config directory...");
-      yield* Effect.tryPromise({
-        try: () => scaffold(cwd, provider),
-        catch: (e) =>
-          new InitError({
-            message: `${e instanceof Error ? e.message : e}`,
-          }),
-      });
-      yield* Console.log("Config directory created.");
+      yield* d.spinner(
+        "Scaffolding .sandcastle/ config directory...",
+        Effect.tryPromise({
+          try: () => scaffold(cwd, provider),
+          catch: (e) =>
+            new InitError({
+              message: `${e instanceof Error ? e.message : e}`,
+            }),
+        }),
+      );
 
       // Build image from .sandcastle/ directory
       const dockerfileDir = join(cwd, CONFIG_DIR);
-      yield* Console.log(`Building Docker image '${imageName}'...`);
-      yield* buildImage(imageName, dockerfileDir);
+      yield* d.spinner(
+        `Building Docker image '${imageName}'...`,
+        buildImage(imageName, dockerfileDir),
+      );
 
-      yield* Console.log("Init complete! Image built successfully.");
+      yield* d.status("Init complete! Image built successfully.", "success");
     }),
 );
 
@@ -89,14 +94,17 @@ const buildImageCommand = Command.make(
   },
   ({ imageName }) =>
     Effect.gen(function* () {
+      const d = yield* Display;
       const cwd = process.cwd();
       yield* requireConfigDir(cwd);
 
       const dockerfileDir = join(cwd, CONFIG_DIR);
-      yield* Console.log(`Building Docker image '${imageName}'...`);
-      yield* buildImage(imageName, dockerfileDir);
+      yield* d.spinner(
+        `Building Docker image '${imageName}'...`,
+        buildImage(imageName, dockerfileDir),
+      );
 
-      yield* Console.log("Build complete!");
+      yield* d.status("Build complete!", "success");
     }),
 );
 
@@ -109,9 +117,12 @@ const removeImageCommand = Command.make(
   },
   ({ imageName }) =>
     Effect.gen(function* () {
-      yield* Console.log(`Removing Docker image '${imageName}'...`);
-      yield* removeImage(imageName);
-      yield* Console.log("Image removed.");
+      const d = yield* Display;
+      yield* d.spinner(
+        `Removing Docker image '${imageName}'...`,
+        removeImage(imageName),
+      );
+      yield* d.status("Image removed.", "success");
     }),
 );
 
@@ -157,6 +168,7 @@ const runCommand = Command.make(
   },
   ({ iterations, imageName, prompt, promptFile, branch, model, agent }) =>
     Effect.gen(function* () {
+      const d = yield* Display;
       const hostRepoDir = process.cwd();
       yield* requireConfigDir(hostRepoDir);
 
@@ -171,16 +183,13 @@ const runCommand = Command.make(
       const resolvedModel = model._tag === "Some" ? model.value : undefined;
       const resolvedAgent = agent._tag === "Some" ? agent.value : undefined;
 
-      yield* Console.log(`=== SANDCASTLE RUN ===`);
-      yield* Console.log(`Image:      ${imageName}`);
-      yield* Console.log(`Iterations: ${resolvedIterations}`);
-      if (resolvedBranch) {
-        yield* Console.log(`Branch:     ${resolvedBranch}`);
-      }
-      if (resolvedModel) {
-        yield* Console.log(`Model:      ${resolvedModel}`);
-      }
-      yield* Console.log(``);
+      const rows: Record<string, string> = {
+        Image: imageName,
+        Iterations: String(resolvedIterations),
+      };
+      if (resolvedBranch) rows["Branch"] = resolvedBranch;
+      if (resolvedModel) rows["Model"] = resolvedModel;
+      yield* d.summary("Sandcastle Run", rows);
 
       const result = yield* Effect.tryPromise({
         try: () =>
@@ -203,12 +212,14 @@ const runCommand = Command.make(
       });
 
       if (result.complete) {
-        yield* Console.log(
-          `\nRun complete: agent finished after ${result.iterationsRun} iteration(s).`,
+        yield* d.status(
+          `Run complete: agent finished after ${result.iterationsRun} iteration(s).`,
+          "success",
         );
       } else {
-        yield* Console.log(
-          `\nRun complete: reached ${result.iterationsRun} iteration(s) without completion signal.`,
+        yield* d.status(
+          `Run complete: reached ${result.iterationsRun} iteration(s) without completion signal.`,
+          "warn",
         );
       }
     }),
@@ -223,11 +234,16 @@ const interactiveSession = (options: {
   sandboxRepoDir: string;
   config: import("./Config.js").SandcastleConfig;
   model?: string;
-}): Effect.Effect<void, import("./errors.js").SandboxError, SandboxFactory> =>
+}): Effect.Effect<
+  void,
+  import("./errors.js").SandboxError,
+  SandboxFactory | Display
+> =>
   Effect.gen(function* () {
     const { hostRepoDir, sandboxRepoDir, config } = options;
     const resolvedModel = options.model ?? config.model ?? DEFAULT_MODEL;
     const factory = yield* SandboxFactory;
+    const d = yield* Display;
 
     yield* factory.withSandbox(
       withSandboxLifecycle(
@@ -239,8 +255,7 @@ const interactiveSession = (options: {
             const containerId = hostnameResult.stdout.trim();
 
             // Launch interactive Claude session with TTY passthrough
-            yield* Console.log("Launching interactive Claude session...");
-            yield* Console.log("");
+            yield* d.status("Launching interactive Claude session...", "info");
 
             const exitCode = yield* Effect.async<number, AgentError>(
               (resume) => {
@@ -276,9 +291,9 @@ const interactiveSession = (options: {
               },
             );
 
-            yield* Console.log("");
-            yield* Console.log(
+            yield* d.status(
               `Session ended (exit code ${exitCode}). Syncing changes back...`,
+              "info",
             );
           }),
       ),
@@ -331,9 +346,8 @@ const interactiveCommand = Command.make(
 
       const resolvedModel = model._tag === "Some" ? model.value : undefined;
 
-      yield* Console.log("=== SANDCASTLE (Interactive) ===");
-      yield* Console.log(`Image: ${imageName}`);
-      yield* Console.log("");
+      const d = yield* Display;
+      yield* d.summary("Sandcastle Interactive", { Image: imageName });
 
       const factoryLayer = DockerSandboxFactory.layer(imageName, env);
 
@@ -350,8 +364,9 @@ const interactiveCommand = Command.make(
 
 const rootCommand = Command.make("sandcastle", {}, () =>
   Effect.gen(function* () {
-    yield* Console.log("Sandcastle v0.0.1");
-    yield* Console.log("Use --help to see available commands.");
+    const d = yield* Display;
+    yield* d.status("Sandcastle v0.0.1", "info");
+    yield* d.status("Use --help to see available commands.", "info");
   }),
 );
 

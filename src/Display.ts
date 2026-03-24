@@ -1,3 +1,4 @@
+import * as clack from "@clack/prompts";
 import { Context, Effect, Layer, Ref } from "effect";
 
 export type Severity = "info" | "success" | "warn" | "error";
@@ -58,4 +59,44 @@ export const SilentDisplay = {
           { _tag: "summary" as const, title, rows },
         ]),
     }),
+};
+
+const severityToClack: Record<Severity, (message: string) => void> = {
+  info: clack.log.info,
+  success: clack.log.success,
+  warn: clack.log.warning,
+  error: clack.log.error,
+};
+
+export const ClackDisplay = {
+  layer: Layer.succeed(Display, {
+    status: (message, severity) =>
+      Effect.sync(() => severityToClack[severity](message)),
+
+    spinner: (message, effect) =>
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const s = clack.spinner();
+          s.start(message);
+          return s;
+        }),
+        () => effect,
+        (s, exit) =>
+          Effect.sync(() => {
+            if (exit._tag === "Success") {
+              s.stop(message);
+            } else {
+              s.stop(`${message} (failed)`);
+            }
+          }),
+      ),
+
+    summary: (title, rows) =>
+      Effect.sync(() => {
+        const lines = Object.entries(rows)
+          .map(([key, value]) => `${key}: ${value}`)
+          .join("\n");
+        clack.note(lines, title);
+      }),
+  }),
 };
