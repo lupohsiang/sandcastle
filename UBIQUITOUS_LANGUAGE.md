@@ -2,12 +2,21 @@
 
 ## Core concepts
 
-| Term           | Definition                                                                                            | Aliases to avoid                                                                        |
-| -------------- | ----------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
-| **Sandcastle** | The TypeScript CLI tool that orchestrates AI coding agents inside isolated environments               | "the tool", "the CLI", "RALPH"                                                          |
-| **Sandbox**    | An isolated environment where an agent executes code — either a Docker container or a local directory | "container" (too specific), "Docker sandbox" (ambiguous with Claude's built-in feature) |
-| **Host**       | The developer's machine where Sandcastle runs and the real git repo lives                             | "local" (ambiguous — the sandbox also has a local filesystem)                           |
-| **Agent**      | The AI coding tool invoked inside the sandbox (e.g. Claude Code, Codex)                               | "RALPH", "the bot", "Claude" (too specific — agent is swappable)                        |
+| Term               | Definition                                                                                                             | Aliases to avoid                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
+| **Sandcastle**     | The TypeScript CLI tool that orchestrates AI coding agents inside isolated environments                                | "the tool", "the CLI", "RALPH"                                                          |
+| **Sandbox**        | An isolated environment where an agent executes code — either a Docker container or a local directory                  | "container" (too specific), "Docker sandbox" (ambiguous with Claude's built-in feature) |
+| **Host**           | The developer's machine where Sandcastle runs and the real git repo lives                                              | "local" (ambiguous — the sandbox also has a local filesystem)                           |
+| **Agent**          | The AI coding tool invoked inside the sandbox (e.g. Claude Code, Codex)                                                | "RALPH", "the bot", "Claude" (too specific — agent is swappable)                        |
+| **Agent provider** | The module that supplies agent-specific configuration: env requirements, Dockerfile template, and env validation logic | "tool adapter", "adapter" (collides with sandbox service aliases), "tool definition"    |
+
+## Environment
+
+| Term             | Definition                                                                                                                           | Aliases to avoid                               |
+| ---------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------- |
+| **Env resolver** | The module that loads environment variables from `.env` files and `process.env`, returning a generic key-value map                   | "token resolver" (too specific to auth tokens) |
+| **Env manifest** | The agent provider's declaration of which environment variables it requires or supports, used to scaffold `.env.example`             | "env example", "env template", "env schema"    |
+| **Env check**    | The agent provider's validation function that inspects the resolved env map and fails with a clear error if requirements are not met | "token validation", "env validation"           |
 
 ## Sync operations
 
@@ -55,7 +64,11 @@
 - Each **iteration** may produce one **patch**; iterations repeat until the **completion signal** fires or the max count is reached
 - **Init** creates the **config directory** on the **host** and then performs **setup-sandbox**
 - **Setup-sandbox** requires the **config directory** to already exist on the **host**
-- Token resolution: repo root `.env` > **config directory** `.env` > process environment variables
+- The **env resolver** loads env vars from: repo root `.env` > **config directory** `.env` > `process.env` — only keys declared in a `.env` file are resolved from `process.env` (updated)
+- Each **agent provider** declares an **env manifest** and an **env check**
+- The **agent provider** is selected via the `agent` field in config or `--agent` CLI flag
+- At launch, Sandcastle resolves env vars via the **env resolver**, runs the active **agent provider**'s **env check**, then passes the full env map into the **sandbox**
+- **Init** uses the **agent provider**'s **env manifest** to scaffold `.env.example` and its Dockerfile template to scaffold the Dockerfile
 
 ## Example dialogue
 
@@ -65,6 +78,10 @@
 > **Domain expert:** "Exactly. The **sync service** doesn't know which layer it's talking to. It calls `exec` and `copyIn` — the **filesystem layer** just runs those as local shell commands."
 > **Dev:** "And when the **agent** makes a commit in the **sandbox**, **sync-out** extracts the **patch** the same way regardless?"
 > **Domain expert:** "Right. The **sync service** calls `exec` to run `git format-patch` and `copyOut` to get the **patch** file back to the **host**."
+> **Dev:** "What if I want to add support for OpenCode instead of Claude Code?"
+> **Domain expert:** "Create a new **agent provider**. It declares its own **env manifest** — maybe it needs `OPEN_CODE_TOKEN` instead of `CLAUDE_CODE_OAUTH_TOKEN`. Its **env check** validates those requirements. And it provides its own Dockerfile template that installs the right binary."
+> **Dev:** "How does Sandcastle know which **agent provider** to use?"
+> **Domain expert:** "The `agent` field in `config.json`, or the `--agent` CLI flag. The **env resolver** loads all env vars generically — it doesn't know or care which **agent** is running. The **agent provider**'s **env check** is what enforces the tool-specific requirements."
 
 ## Flagged ambiguities
 
@@ -72,4 +89,5 @@
 - **"Container"** vs **"Sandbox"** — "Container" is the Docker primitive; **sandbox** is our abstraction over it. Use **sandbox** when talking about the concept, "container" only when discussing Docker implementation details.
 - **"Local"** vs **"Host"** — Both could mean the developer's machine, but "local" is ambiguous (the filesystem layer's sandbox is also local). Use **host** to mean the developer's machine. Reserve "local" for generic contexts.
 - **"Run"** — Ambiguous between the CLI command (`sandcastle run`) and a single **iteration**. Use **iteration** for one agent invocation; use "run command" or "run session" for the CLI command that drives multiple iterations.
-- **"Adapter"** vs **"Layer"** — We use **layer** (Effect terminology) for implementations of the **Sandbox service**. Avoid "adapter" and "transport" as they suggest different patterns.
+- **"Adapter"** vs **"Layer"** — We use **layer** (Effect terminology) for implementations of the **Sandbox service**. Avoid "adapter" and "transport" as they suggest different patterns. The new **agent provider** concept is NOT an adapter — it provides configuration and validation, not an alternative implementation of a service interface. (updated)
+- **"Token"** vs **"Env var"** — The old `TokenResolver` name implied it only handled auth tokens. The **env resolver** handles all environment variables generically. Use "env var" for the general concept; "token" only when referring specifically to an auth credential value. (new)
