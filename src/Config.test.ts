@@ -108,6 +108,22 @@ describe("readConfig", () => {
     expect(config.model).toBeUndefined();
   });
 
+  it("reads agent from config", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
+    await setupConfigDir(repoDir, { agent: "claude-code" });
+
+    const config = await Effect.runPromise(readConfig(repoDir));
+    expect(config.agent).toBe("claude-code");
+  });
+
+  it("returns undefined for agent when not set", async () => {
+    const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
+    await setupConfigDir(repoDir, {});
+
+    const config = await Effect.runPromise(readConfig(repoDir));
+    expect(config.agent).toBeUndefined();
+  });
+
   it("accepts valid hooks config", async () => {
     const repoDir = await mkdtemp(join(tmpdir(), "config-test-"));
     await setupConfigDir(repoDir, {
