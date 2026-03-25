@@ -104,8 +104,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     resolvedLogging.type === "file"
       ? (() => {
           mkdirSync(dirname(resolvedLogging.path), { recursive: true });
-          console.log(`Agent started. Logs: ${resolvedLogging.path}`);
-          console.log(`  tail -f ${resolvedLogging.path}`);
+          console.log(`Agent started. tail -f ${resolvedLogging.path}`);
           return FileDisplay.layer(resolvedLogging.path);
         })()
       : ClackDisplay.layer;
