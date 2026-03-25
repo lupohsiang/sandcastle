@@ -26,15 +26,17 @@
 
 ## Execution
 
-| Term                  | Definition                                                                                                                     | Aliases to avoid                                                                         |
-| --------------------- | ------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
-| **Iteration**         | A single invocation of the agent inside the sandbox, producing at most one commit against one task                             | "run" (ambiguous with the CLI command), "cycle", "loop"                                  |
-| **Task**              | A GitHub issue that the agent selects and works on during an iteration                                                         | "job", "work item", "ticket"                                                             |
-| **Completion signal** | The `<promise>COMPLETE</promise>` marker in the agent's output indicating all actionable tasks are finished                    | "done flag", "exit signal"                                                               |
-| **Orchestrator**      | The module that drives the iteration loop: sync-in, invoke agent, check for commits, sync-out, check completion signal, repeat | "runner", "loop", "wrapper script"                                                       |
-| **Prompt**            | The instruction text passed to the agent at the start of each iteration — may contain **shell expressions**                    | "system prompt" (too specific), "instructions" (too vague), "message"                    |
-| **Prompt expansion**  | The preprocessing step that finds and evaluates all **shell expressions** in a **prompt** before passing it to the agent       | "prompt preprocessing" (too generic), "command expansion"                                |
-| **Shell expression**  | A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the sandbox and is replaced with its stdout    | "command" (overloaded — collides with hook commands), "inline command", "prompt command" |
+| Term                             | Definition                                                                                                                           | Aliases to avoid                                                                         |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------- |
+| **Iteration**                    | A single invocation of the agent inside the sandbox, producing at most one commit against one task                                   | "run" (ambiguous with the CLI command), "cycle", "loop"                                  |
+| **Task**                         | A GitHub issue that the agent selects and works on during an iteration                                                               | "job", "work item", "ticket"                                                             |
+| **Completion signal**            | The `<promise>COMPLETE</promise>` marker in the agent's output indicating all actionable tasks are finished                          | "done flag", "exit signal"                                                               |
+| **Orchestrator**                 | The module that drives the iteration loop: sync-in, invoke agent, check for commits, sync-out, check completion signal, repeat       | "runner", "loop", "wrapper script"                                                       |
+| **Prompt**                       | The instruction text passed to the agent at the start of each iteration — may contain **prompt arguments** and **shell expressions** | "system prompt" (too specific), "instructions" (too vague), "message"                    |
+| **Prompt argument**              | A named key-value pair passed via `promptArgs` in `run()` that substitutes a `{{KEY}}` placeholder in a **prompt**                   | "prompt variable" (ambiguous with env vars), "template variable", "parameter"            |
+| **Prompt argument substitution** | The preprocessing step that replaces all `{{KEY}}` placeholders in a **prompt** with values from the **prompt arguments** map        | "template expansion", "interpolation", "variable substitution"                           |
+| **Prompt expansion**             | The preprocessing step that finds and evaluates all **shell expressions** in a **prompt** before passing it to the agent             | "prompt preprocessing" (too generic), "command expansion"                                |
+| **Shell expression**             | A `` !`command` `` marker in a **prompt** that evaluates a shell command inside the sandbox and is replaced with its stdout          | "command" (overloaded — collides with hook commands), "inline command", "prompt command" |
 
 ## Project structure
 
@@ -69,8 +71,11 @@
 - The **agent provider** is selected via the `agent` field in config or `--agent` CLI flag
 - At launch, Sandcastle resolves env vars via the **env resolver**, runs the active **agent provider**'s **env check**, then passes the full env map into the **sandbox**
 - **Init** uses the **agent provider**'s **env manifest** to scaffold `.env.example` and its Dockerfile template to scaffold the Dockerfile
+- **Prompt argument substitution** runs once after prompt resolution, replacing `{{KEY}}` placeholders with values from **prompt arguments** — this happens on the **host**, before the **sandbox** exists
 - **Prompt expansion** runs before each **iteration**, evaluating all **shell expressions** inside the **sandbox**
-- A prompt may contain zero or more **shell expressions**; if none are found, **prompt expansion** is skipped entirely
+- **Prompt argument substitution** runs before **prompt expansion**, so **prompt arguments** can inject values into **shell expressions**
+- A `{{KEY}}` placeholder with no matching **prompt argument** is an error; unused **prompt arguments** produce a warning
+- A **prompt** may contain zero or more **prompt arguments** and/or **shell expressions**; each substitution step is skipped if there are no matches
 
 ## Example dialogue
 
@@ -94,13 +99,21 @@
 
 > **Domain expert:** "The `agent` field in `config.json`, or the `--agent` CLI flag. The **env resolver** loads all env vars generically — it doesn't know or care which **agent** is running. The **agent provider**'s **env check** is what enforces the tool-specific requirements."
 
-> **Dev:** "I see `` !`gh issue list` `` in the **prompt** file — what happens with that?"
+> **Dev:** "I want to reuse the same **prompt** file for multiple issues in parallel. How do I pass the issue number in?"
 
-> **Domain expert:** "That's a **shell expression**. Before each **iteration**, **prompt expansion** finds all **shell expressions** in the **prompt**, executes them inside the **sandbox**, and replaces them with stdout. If there are no **shell expressions**, the step is skipped entirely."
+> **Domain expert:** "Use **prompt arguments**. Put `{{ISSUE_NUMBER}}` in the **prompt** file, then pass `promptArgs: { ISSUE_NUMBER: 42 }` to `run()`. **Prompt argument substitution** replaces it before anything else runs."
 
-> **Dev:** "So the **agent** never sees the `` !`...` `` syntax?"
+> **Dev:** "What if I also have a **shell expression** that uses the issue number — like `` !`gh issue view {{ISSUE_NUMBER}}` ``?"
 
-> **Domain expert:** "Correct. By the time the **prompt** reaches the **agent**, every **shell expression** has been replaced with its output."
+> **Domain expert:** "That works. **Prompt argument substitution** runs first on the **host**, so `{{ISSUE_NUMBER}}` becomes `42` everywhere — including inside **shell expressions**. Then **prompt expansion** evaluates the **shell expression** inside the **sandbox**."
+
+> **Dev:** "What happens if I typo the key — like `{{ISSUE_NUBMER}}`?"
+
+> **Domain expert:** "**Prompt argument substitution** fails with an error. Every `{{KEY}}` in the **prompt** must have a matching **prompt argument**. The reverse is just a warning — unused **prompt arguments** don't block execution."
+
+> **Dev:** "So the **agent** never sees `{{...}}` or `` !`...` `` syntax?"
+
+> **Domain expert:** "Correct. By the time the **prompt** reaches the **agent**, both substitution steps have run and replaced everything with concrete values."
 
 ## Flagged ambiguities
 
@@ -111,3 +124,4 @@
 - **"Adapter"** vs **"Layer"** — We use **layer** (Effect terminology) for implementations of the **Sandbox service**. Avoid "adapter" and "transport" as they suggest different patterns. The new **agent provider** concept is NOT an adapter — it provides configuration and validation, not an alternative implementation of a service interface.
 - **"Token"** vs **"Env var"** — The old `TokenResolver` name implied it only handled auth tokens. The **env resolver** handles all environment variables generically. Use "env var" for the general concept; "token" only when referring specifically to an auth credential value.
 - **"Command"** — Heavily overloaded: hook commands, shell commands, CLI commands, **shell expressions**. Use **shell expression** for the `` !`...` `` syntax in **prompts**; use "hook" for lifecycle hooks; use "CLI command" for `sandcastle run`, `sandcastle init`, etc.
+- **"Variable"** vs **"Argument"** — Env vars and **prompt arguments** are both key-value pairs, but they serve different purposes. **Prompt arguments** are host-side values substituted into `{{KEY}}` placeholders. Env vars are passed into the **sandbox** environment. Don't call prompt arguments "variables" or "template variables".
