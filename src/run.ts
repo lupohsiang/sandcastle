@@ -1,7 +1,7 @@
 import { Effect, Layer } from "effect";
 import { getAgentProvider } from "./AgentProvider.js";
 import { readConfig } from "./Config.js";
-import { ClackDisplay } from "./Display.js";
+import { ClackDisplay, Display } from "./Display.js";
 import { orchestrate } from "./Orchestrator.js";
 import { resolvePrompt } from "./PromptResolver.js";
 import { DockerSandboxFactory } from "./SandboxFactory.js";
@@ -78,14 +78,25 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   const runLayer = Layer.merge(factoryLayer, ClackDisplay.layer);
 
   const result = await Effect.runPromise(
-    orchestrate({
-      hostRepoDir,
-      sandboxRepoDir,
-      iterations: maxIterations,
-      config: resolvedConfig,
-      prompt: resolvedPrompt,
-      branch,
-      model: resolvedModel,
+    Effect.gen(function* () {
+      const d = yield* Display;
+      const rows: Record<string, string> = {
+        Image: _imageName,
+        Iterations: String(maxIterations),
+      };
+      if (branch) rows["Branch"] = branch;
+      if (resolvedModel) rows["Model"] = resolvedModel;
+      yield* d.summary("Sandcastle Run", rows);
+
+      return yield* orchestrate({
+        hostRepoDir,
+        sandboxRepoDir,
+        iterations: maxIterations,
+        config: resolvedConfig,
+        prompt: resolvedPrompt,
+        branch,
+        model: resolvedModel,
+      });
     }).pipe(Effect.provide(runLayer)),
   );
 

@@ -183,14 +183,6 @@ const runCommand = Command.make(
       const resolvedModel = model._tag === "Some" ? model.value : undefined;
       const resolvedAgent = agent._tag === "Some" ? agent.value : undefined;
 
-      const rows: Record<string, string> = {
-        Image: imageName,
-        Iterations: String(resolvedIterations),
-      };
-      if (resolvedBranch) rows["Branch"] = resolvedBranch;
-      if (resolvedModel) rows["Model"] = resolvedModel;
-      yield* d.summary("Sandcastle Run", rows);
-
       const result = yield* Effect.tryPromise({
         try: () =>
           run({
