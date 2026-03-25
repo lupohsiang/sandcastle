@@ -25,6 +25,11 @@ const TEMPLATES: TemplateMetadata[] = [
     description: "Picks GitHub issues one by one and closes them",
   },
   {
+    name: "sequential-reviewer",
+    description:
+      "Implements issues one by one, with a code review step after each",
+  },
+  {
     name: "parallel-planner",
     description:
       "Plans parallelizable issues, executes on separate branches, merges",

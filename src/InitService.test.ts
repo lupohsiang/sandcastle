@@ -202,6 +202,83 @@ describe("InitService scaffold", () => {
     expect(prompt).toContain("<promise>COMPLETE</promise>");
   });
 
+  describe("sequential-reviewer template", () => {
+    it("produces main.ts, implement-prompt.md, and review-prompt.md", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, fakeProvider, "sequential-reviewer");
+
+      const configDir = join(dir, ".sandcastle");
+      const { access } = await import("node:fs/promises");
+
+      await expect(access(join(configDir, "main.ts"))).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "implement-prompt.md")),
+      ).resolves.toBeUndefined();
+      await expect(
+        access(join(configDir, "review-prompt.md")),
+      ).resolves.toBeUndefined();
+    });
+
+    it("main.ts calls sandcastle.run() twice per iteration (implement + review)", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, fakeProvider, "sequential-reviewer");
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.ts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("sandcastle");
+      // Two run() calls — implement and review
+      const runCallCount = (mainTs.match(/\.run\(/g) ?? []).length;
+      expect(runCallCount).toBeGreaterThanOrEqual(2);
+      expect(mainTs).toContain("implement-prompt.md");
+      expect(mainTs).toContain("review-prompt.md");
+    });
+
+    it("main.ts passes branch from implement result to review run", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, fakeProvider, "sequential-reviewer");
+
+      const mainTs = await readFile(
+        join(dir, ".sandcastle", "main.ts"),
+        "utf-8",
+      );
+      expect(mainTs).toContain("branch");
+    });
+
+    it("implement-prompt.md contains {{ISSUE_NUMBER}}, {{ISSUE_TITLE}}, {{BRANCH}} prompt arguments", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, fakeProvider, "sequential-reviewer");
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "implement-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("{{ISSUE_NUMBER}}");
+      expect(prompt).toContain("{{ISSUE_TITLE}}");
+      expect(prompt).toContain("{{BRANCH}}");
+    });
+
+    it("review-prompt.md contains {{BRANCH}} prompt argument", async () => {
+      const dir = await makeDir();
+      await runScaffold(dir, fakeProvider, "sequential-reviewer");
+
+      const prompt = await readFile(
+        join(dir, ".sandcastle", "review-prompt.md"),
+        "utf-8",
+      );
+      expect(prompt).toContain("{{BRANCH}}");
+    });
+
+    it("sequential-reviewer appears in listTemplates()", async () => {
+      const { listTemplates } = await import("./InitService.js");
+      const templates = listTemplates();
+      expect(templates.some((t) => t.name === "sequential-reviewer")).toBe(
+        true,
+      );
+    });
+  });
+
   it("unknown template name throws a clear error", async () => {
     const dir = await makeDir();
     await expect(runScaffold(dir, fakeProvider, "nonexistent")).rejects.toThrow(
