@@ -248,7 +248,7 @@ export const orchestrate = (
       duration: Duration.seconds(timeoutSeconds),
       onTimeout: () =>
         new TimeoutError({
-          message: `Run timed out after ${timeoutSeconds} seconds`,
+          message: `Run timed out after ${timeoutSeconds / 60} minutes`,
           timeoutSeconds,
         }),
     }),

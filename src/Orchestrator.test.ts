@@ -1473,7 +1473,8 @@ describe("Orchestrator Display integration", () => {
       expect(err).toBeInstanceOf(TimeoutError);
       if (err instanceof TimeoutError) {
         expect(err.timeoutSeconds).toBe(0.1);
-        expect(err.message).toContain("0.1");
+        expect(err.message).toContain("minutes");
+        expect(err.message).not.toContain("seconds");
       }
     }
   }, 10_000);
