@@ -2,4 +2,4 @@ Use `npm run typecheck` for type checking.
 
 Check @UBIQUITOUS_LANGUAGE.md for terminology questions.
 
-For user-facing changes, add a changeset to `.changeset`. We use `@changesets/cli`.
+For user-facing changes, add a changeset to `.changeset`. We use `@changesets/cli`, but you can create the file manually.
