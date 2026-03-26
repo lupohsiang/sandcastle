@@ -1,7 +1,7 @@
 import * as sandcastle from "@ai-hero/sandcastle";
 
 const hooks = {
-  onSandboxReady: [{ command: "pnpm install && pnpm run build" }],
+  onSandboxReady: [{ command: "npm install && npm run build" }],
 };
 
 const MAX_ITERATIONS = 10;
