@@ -2,6 +2,11 @@ import { Effect } from "effect";
 import { Display } from "./Display.js";
 import { PromptError } from "./errors.js";
 
+/**
+ * A map of named values used for prompt argument substitution.
+ * Each key corresponds to a `{{KEY}}` placeholder in the prompt; the value
+ * replaces it before the prompt is passed to the agent.
+ */
 export type PromptArgs = Record<string, string | number | boolean>;
 
 const PLACEHOLDER_PATTERN = /\{\{([A-Za-z_][A-Za-z0-9_]*)\}\}/g;

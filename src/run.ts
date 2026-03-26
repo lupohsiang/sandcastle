@@ -100,8 +100,15 @@ export const buildCompletionMessage = (
   };
 };
 
+/**
+ * Controls where Sandcastle writes iteration progress and agent output.
+ * Use `"file"` (log-to-file mode) to write to a log file on disk, or
+ * `"stdout"` (terminal mode) to render an interactive UI in the terminal.
+ */
 export type LoggingOption =
+  /** Write progress and agent output to a log file at the given path (log-to-file mode). */
   | { readonly type: "file"; readonly path: string }
+  /** Render progress and agent output as an interactive UI in the terminal (terminal mode). */
   | { readonly type: "stdout" };
 
 export interface RunOptions {
@@ -138,10 +145,15 @@ export interface RunOptions {
 }
 
 export interface RunResult {
+  /** Number of iterations the agent completed during this run. */
   readonly iterationsRun: number;
+  /** Whether the agent emitted the completion signal before the iteration limit was reached. */
   readonly wasCompletionSignalDetected: boolean;
+  /** Combined stdout output from all agent iterations. */
   readonly stdout: string;
+  /** List of commits made by the agent during the run, each identified by its SHA. */
   readonly commits: { sha: string }[];
+  /** The branch name the agent worked on inside the sandbox. */
   readonly branch: string;
   /** Path to the log file, if logging was drained to a file. */
   readonly logFilePath?: string;
