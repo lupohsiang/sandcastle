@@ -300,14 +300,15 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
       yield* d.summary("Sandcastle Run", rows);
 
       // Validate that the user has not provided built-in prompt argument keys
-      yield* validateNoBuiltInArgOverride(options.promptArgs ?? {});
+      const userArgs = options.promptArgs ?? {};
+      yield* validateNoBuiltInArgOverride(userArgs);
 
       // Build effective args: built-in args merged with user-provided args.
       // Built-in keys are silenced so they don't trigger unused-arg warnings.
       const effectiveArgs = {
         SOURCE_BRANCH: resolvedBranch,
         TARGET_BRANCH: currentHostBranch,
-        ...(options.promptArgs ?? {}),
+        ...userArgs,
       };
       const builtInArgKeysSet = new Set<string>(BUILT_IN_PROMPT_ARG_KEYS);
       const resolvedPrompt = yield* substitutePromptArgs(
