@@ -279,6 +279,7 @@ export const orchestrate = (
     const allCommits: { sha: string }[] = [];
     let allStdout = "";
     let resolvedBranch = "";
+    let iterationPreservedPath: string | undefined;
 
     for (let i = 1; i <= iterations; i++) {
       yield* display.status(label(`Iteration ${i}/${iterations}`), "info");
@@ -340,7 +341,7 @@ export const orchestrate = (
       );
 
       const lifecycleResult = sandboxResult.value;
-      const iterationPreservedPath = sandboxResult.preservedWorktreePath;
+      iterationPreservedPath = sandboxResult.preservedWorktreePath;
 
       allCommits.push(...lifecycleResult.commits);
       allStdout += lifecycleResult.result.stdout;
@@ -372,7 +373,7 @@ export const orchestrate = (
       stdout: allStdout,
       commits: allCommits,
       branch: resolvedBranch,
-      preservedWorktreePath: undefined,
+      preservedWorktreePath: iterationPreservedPath,
     };
   });
 };

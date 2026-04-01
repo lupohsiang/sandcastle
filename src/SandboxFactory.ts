@@ -285,32 +285,15 @@ export class WorktreeSandboxConfig extends Context.Tag("WorktreeSandboxConfig")<
 >() {}
 
 /**
- * Print a message to stderr telling the developer where the preserved worktree is
- * and how to clean it up manually (failure + dirty case).
+ * Print a message to stderr about a preserved worktree, with review and cleanup instructions.
  */
-const printWorktreePreservedMessage = (worktreePath: string): void => {
-  console.error(`\nWorktree preserved at ${worktreePath}`);
+const printWorktreePreservedMessage = (
+  worktreePath: string,
+  reason: string,
+): void => {
+  console.error(`\n${reason}`);
   console.error(`  To review: cd ${worktreePath}`);
   console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
-};
-
-/**
- * Print a message to stderr when the run succeeded but the worktree has uncommitted changes.
- */
-const printSuccessDirtyWorktreeMessage = (worktreePath: string): void => {
-  console.error(
-    `\nRun succeeded but worktree has uncommitted changes at ${worktreePath}`,
-  );
-  console.error(`  To review: cd ${worktreePath}`);
-  console.error(`  To clean up: git worktree remove --force ${worktreePath}`);
-};
-
-/**
- * Print a message to stderr when the worktree was removed because there were
- * no uncommitted changes after a failed run.
- */
-const printWorktreeRemovedCleanMessage = (): void => {
-  console.error(`\nWorktree removed (no uncommitted changes)`);
 };
 
 /**
@@ -396,7 +379,10 @@ export const WorktreeDockerSandboxFactory = {
                   };
                   const onSignal = () => {
                     cleanupContainerOnly();
-                    printWorktreePreservedMessage(worktreeInfo.path);
+                    printWorktreePreservedMessage(
+                      worktreeInfo.path,
+                      `Worktree preserved at ${worktreeInfo.path}`,
+                    );
                     process.exit(1);
                   };
 
@@ -456,15 +442,18 @@ export const WorktreeDockerSandboxFactory = {
                     Effect.flatMap((isDirty) => {
                       if (isDirty) {
                         preservedWorktreePath = worktreeInfo.path;
-                        if (Exit.isSuccess(exit)) {
-                          printSuccessDirtyWorktreeMessage(worktreeInfo.path);
-                        } else {
-                          printWorktreePreservedMessage(worktreeInfo.path);
-                        }
+                        printWorktreePreservedMessage(
+                          worktreeInfo.path,
+                          Exit.isSuccess(exit)
+                            ? `Run succeeded but worktree has uncommitted changes at ${worktreeInfo.path}`
+                            : `Worktree preserved at ${worktreeInfo.path}`,
+                        );
                         return Effect.void;
                       } else {
                         if (!Exit.isSuccess(exit)) {
-                          printWorktreeRemovedCleanMessage();
+                          console.error(
+                            `\nWorktree removed (no uncommitted changes)`,
+                          );
                         }
                         return WorktreeManager.remove(worktreeInfo.path);
                       }

@@ -346,6 +346,5 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     ...result,
     logFilePath:
       resolvedLogging.type === "file" ? resolvedLogging.path : undefined,
-    preservedWorktreePath: result.preservedWorktreePath,
   };
 };
