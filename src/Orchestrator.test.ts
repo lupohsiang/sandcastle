@@ -10,6 +10,12 @@ import { describe, expect, it } from "vitest";
 import { Display, type DisplayEntry, SilentDisplay } from "./Display.js";
 import { makeLocalSandboxLayer } from "./testSandbox.js";
 import {
+  AgentProvider,
+  ClaudeCodeProvider,
+  type AgentProviderService,
+  type AgentOutputEvent,
+} from "./AgentProvider.js";
+import {
   DEFAULT_MODEL,
   formatToolCall,
   orchestrate,
@@ -25,6 +31,9 @@ const execAsync = promisify(exec);
 const testDisplayLayer = SilentDisplay.layer(
   Ref.unsafeMake<ReadonlyArray<DisplayEntry>>([]),
 );
+
+/** Base layer for orchestrator tests: ClaudeCodeProvider + silent display */
+const testBaseLayer = Layer.merge(testDisplayLayer, ClaudeCodeProvider.layer);
 
 const initRepo = async (dir: string) => {
   await execAsync("git init -b main", { cwd: dir });
@@ -213,7 +222,7 @@ describe("Orchestrator", () => {
         iterations: 1,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(1);
@@ -246,7 +255,7 @@ describe("Orchestrator", () => {
         iterations: 5,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(1);
@@ -275,7 +284,7 @@ describe("Orchestrator", () => {
         iterations: 5,
         prompt: "do some work",
         completionSignal: "TASK_FINISHED",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(1);
@@ -304,7 +313,7 @@ describe("Orchestrator", () => {
         iterations: 2,
         prompt: "do some work",
         completionSignal: "TASK_FINISHED",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     // Custom signal not in output, so all iterations run
@@ -334,7 +343,7 @@ describe("Orchestrator", () => {
         iterations: 5,
         prompt: "do some work",
         completionSignal: ["TASK_FINISHED", "TASK_ABORTED"],
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(1);
@@ -363,7 +372,7 @@ describe("Orchestrator", () => {
         iterations: 5,
         prompt: "do some work",
         completionSignal: ["TASK_FINISHED", "TASK_ABORTED"],
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(1);
@@ -392,7 +401,7 @@ describe("Orchestrator", () => {
         iterations: 2,
         prompt: "do some work",
         completionSignal: ["TASK_FINISHED", "TASK_ABORTED"],
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(2);
@@ -444,7 +453,7 @@ describe("Orchestrator", () => {
         iterations: 5,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(3);
@@ -479,7 +488,7 @@ describe("Orchestrator", () => {
         iterations: 2,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(2);
@@ -523,7 +532,7 @@ describe("Orchestrator", () => {
         iterations: 3,
 
         prompt: "test isolation",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(2);
@@ -554,7 +563,7 @@ describe("OrchestrateResult", () => {
         sandboxRepoDir,
         iterations: 1,
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.stdout).toContain(
@@ -601,7 +610,7 @@ describe("OrchestrateResult", () => {
         sandboxRepoDir,
         iterations: 5,
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.commits).toHaveLength(3);
@@ -634,7 +643,7 @@ describe("OrchestrateResult", () => {
         sandboxRepoDir,
         iterations: 1,
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.commits).toEqual([]);
@@ -668,7 +677,7 @@ describe("OrchestrateResult", () => {
         sandboxRepoDir,
         iterations: 1,
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     // Branch should match the host's current branch
@@ -681,6 +690,128 @@ describe("OrchestrateResult", () => {
     // The sha should match what's on the host
     const hostHead = await getHead(hostDir);
     expect(result.commits[0]!.sha).toBe(hostHead);
+  });
+});
+
+describe("Orchestrator AgentProvider integration", () => {
+  it("uses AgentProvider.buildCommand instead of hardcoded command", async () => {
+    const hostDir = await mkdtemp(join(tmpdir(), "orch-provider-"));
+    await initRepo(hostDir);
+    await commitFile(hostDir, "hello.txt", "hello", "initial commit");
+
+    let capturedCommand = "";
+
+    // Custom provider that uses echo instead of claude
+    const customProvider: AgentProviderService = {
+      name: "test-agent",
+      envManifest: {},
+      dockerfileTemplate: "",
+      buildCommand: (prompt, model) =>
+        `echo '{"type":"result","result":"custom-${model}"}'`,
+      parseOutputLine: (line): AgentOutputEvent[] => {
+        if (!line.startsWith("{")) return [];
+        try {
+          const obj = JSON.parse(line);
+          if (obj.type === "result" && typeof obj.result === "string") {
+            return [{ type: "result", result: obj.result, usage: null }];
+          }
+        } catch {}
+        return [];
+      },
+    };
+
+    const sandboxBaseDir = join(tmpdir(), `orch-provider-sb-${randomUUID()}`);
+    const sandboxRepoDir = sandboxBaseDir;
+    let branchCounter = 0;
+
+    const factoryLayer = Layer.succeed(SandboxFactory, {
+      withSandbox: <A, E, R>(
+        makeEffect: (
+          info: import("./SandboxFactory.js").SandboxInfo,
+        ) => Effect.Effect<A, E, R | Sandbox>,
+      ): Effect.Effect<
+        import("./SandboxFactory.js").WithSandboxResult<A>,
+        E | DockerError,
+        Exclude<R, Sandbox>
+      > =>
+        Effect.acquireUseRelease(
+          Effect.promise(async () => {
+            await rm(sandboxBaseDir, { recursive: true, force: true });
+            const branchName = `sandcastle/test-${++branchCounter}`;
+            await execAsync(
+              `git worktree add -b "${branchName}" "${sandboxBaseDir}" HEAD`,
+              { cwd: hostDir },
+            );
+            return branchName;
+          }),
+          (_branchName) => {
+            const fsLayer = makeLocalSandboxLayer(sandboxBaseDir);
+            // Intercept all commands to capture the agent command
+            const interceptLayer = Layer.succeed(Sandbox, {
+              exec: (command, options) =>
+                Effect.flatMap(Sandbox, (real) =>
+                  real.exec(command, options),
+                ).pipe(Effect.provide(fsLayer)),
+              execStreaming: (command, onStdoutLine, options) => {
+                // Capture the command that would be the agent invocation
+                if (!command.startsWith("git ") && !command.startsWith("sh ")) {
+                  capturedCommand = command;
+                }
+                return Effect.flatMap(Sandbox, (real) =>
+                  real.execStreaming(command, onStdoutLine, options),
+                ).pipe(Effect.provide(fsLayer));
+              },
+              copyIn: (hostPath, sandboxPath) =>
+                Effect.flatMap(Sandbox, (real) =>
+                  real.copyIn(hostPath, sandboxPath),
+                ).pipe(Effect.provide(fsLayer)),
+              copyOut: (sandboxPath, hostPath) =>
+                Effect.flatMap(Sandbox, (real) =>
+                  real.copyOut(sandboxPath, hostPath),
+                ).pipe(Effect.provide(fsLayer)),
+            });
+            return makeEffect({ hostWorktreePath: sandboxBaseDir }).pipe(
+              Effect.provide(interceptLayer),
+            ) as Effect.Effect<A, E | DockerError, Exclude<R, Sandbox>>;
+          },
+          () =>
+            Effect.promise(async () => {
+              try {
+                await execAsync(
+                  `git worktree remove "${sandboxBaseDir}" --force`,
+                  { cwd: hostDir },
+                ).catch(() => {});
+              } catch {}
+            }),
+        ).pipe(
+          Effect.map((value) => ({
+            value,
+            preservedWorktreePath: undefined,
+          })),
+        ),
+    });
+
+    const providerLayer = Layer.succeed(AgentProvider, customProvider);
+
+    const result = await Effect.runPromise(
+      orchestrate({
+        hostRepoDir: hostDir,
+        sandboxRepoDir,
+        iterations: 1,
+        prompt: "test prompt",
+        model: "test-model",
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(factoryLayer, testDisplayLayer, providerLayer),
+        ),
+      ),
+    );
+
+    // The captured command should be from buildCommand, not the hardcoded claude command
+    expect(capturedCommand).toContain("echo");
+    expect(capturedCommand).not.toContain("claude");
+    // The result should come from our custom parseOutputLine
+    expect(result.stdout).toContain("custom-test-model");
   });
 });
 
@@ -1097,7 +1228,13 @@ describe("Orchestrator tool call display integration", () => {
         iterations: 1,
         prompt: "do some work",
       }).pipe(
-        Effect.provide(Layer.merge(mockLayer.factoryLayer, displayLayer)),
+        Effect.provide(
+          Layer.mergeAll(
+            mockLayer.factoryLayer,
+            displayLayer,
+            ClaudeCodeProvider.layer,
+          ),
+        ),
       ),
     );
 
@@ -1170,7 +1307,7 @@ describe("Orchestrator error handling", () => {
         iterations: 1,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(exit._tag).toBe("Failure");
@@ -1230,7 +1367,7 @@ describe("Orchestrator error handling", () => {
         iterations: 5,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     // Should detect COMPLETE from the stdout fallback
@@ -1312,7 +1449,7 @@ describe("Orchestrator error handling", () => {
         iterations: 3,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     // Should have failed on iteration 2
@@ -1336,7 +1473,7 @@ describe("Orchestrator error handling", () => {
         iterations: 1,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(exit._tag).toBe("Failure");
@@ -1389,7 +1526,7 @@ describe("Orchestrator error handling", () => {
         iterations: 1,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(exit._tag).toBe("Failure");
@@ -1451,7 +1588,7 @@ describe("Orchestrator streaming", () => {
         iterations: 1,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(capturedCommand).toContain("--output-format stream-json");
@@ -1481,7 +1618,7 @@ describe("Orchestrator streaming", () => {
         iterations: 5,
 
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(result.iterationsRun).toBe(1);
@@ -1541,7 +1678,7 @@ describe("Orchestrator streaming", () => {
         sandboxRepoDir,
         iterations: 1,
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(capturedCommand).toContain(`--model ${DEFAULT_MODEL}`);
@@ -1601,7 +1738,7 @@ describe("Orchestrator streaming", () => {
         iterations: 1,
         prompt: "do some work",
         model: "claude-sonnet-4-6",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     expect(capturedCommand).toContain("--model claude-sonnet-4-6");
@@ -1664,7 +1801,7 @@ describe("Orchestrator prompt preprocessing", () => {
         sandboxRepoDir,
         iterations: 1,
         prompt: "Context: !`echo hello-from-sandbox`\n\nDo the work.",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, testDisplayLayer))),
+      }).pipe(Effect.provide(Layer.merge(factoryLayer, testBaseLayer))),
     );
 
     // The prompt should have !`echo hello-from-sandbox` replaced with "hello-from-sandbox"
@@ -1734,7 +1871,11 @@ describe("Orchestrator prompt preprocessing", () => {
         sandboxRepoDir: sr2,
         iterations: 1,
         prompt: "Just a plain prompt with no commands.",
-      }).pipe(Effect.provide(Layer.merge(fl2, testDisplayLayer))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(fl2, testDisplayLayer, ClaudeCodeProvider.layer),
+        ),
+      ),
     );
 
     expect(capturedPrompt).toContain("Just a plain prompt with no commands.");
@@ -1820,7 +1961,13 @@ describe("Orchestrator Display integration", () => {
         iterations: 5,
         prompt: "do some work",
       }).pipe(
-        Effect.provide(Layer.merge(mockLayer.factoryLayer, displayLayer)),
+        Effect.provide(
+          Layer.mergeAll(
+            mockLayer.factoryLayer,
+            displayLayer,
+            ClaudeCodeProvider.layer,
+          ),
+        ),
       ),
     );
 
@@ -1891,7 +2038,11 @@ describe("Orchestrator Display integration", () => {
         sandboxRepoDir,
         iterations: 2,
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, displayLayer))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(factoryLayer, displayLayer, ClaudeCodeProvider.layer),
+        ),
+      ),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -1930,7 +2081,7 @@ describe("Orchestrator Display integration", () => {
         prompt: "test",
         // No idleTimeoutSeconds — should default to 5 minutes (300s)
       }).pipe(
-        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.provide(Layer.merge(factoryLayer, testBaseLayer)),
         Effect.exit,
       ),
     );
@@ -1963,7 +2114,11 @@ describe("Orchestrator Display integration", () => {
         iterations: 1,
         prompt: "do some work",
         name: "issue-42",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, displayLayer))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(factoryLayer, displayLayer, ClaudeCodeProvider.layer),
+        ),
+      ),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -2002,7 +2157,11 @@ describe("Orchestrator Display integration", () => {
         sandboxRepoDir,
         iterations: 1,
         prompt: "do some work",
-      }).pipe(Effect.provide(Layer.merge(factoryLayer, displayLayer))),
+      }).pipe(
+        Effect.provide(
+          Layer.mergeAll(factoryLayer, displayLayer, ClaudeCodeProvider.layer),
+        ),
+      ),
     );
 
     const entries = await Effect.runPromise(Ref.get(ref));
@@ -2036,7 +2195,7 @@ describe("Orchestrator Display integration", () => {
         prompt: "test",
         idleTimeoutSeconds: 0.1, // 100ms — well below the 2s agent delay with no output
       }).pipe(
-        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.provide(Layer.merge(factoryLayer, testBaseLayer)),
         Effect.exit,
       ),
     );
@@ -2121,7 +2280,7 @@ describe("Orchestrator Display integration", () => {
         prompt: "test",
         idleTimeoutSeconds: 0.15, // 150ms — timer resets on text at t=100ms
       }).pipe(
-        Effect.provide(Layer.merge(factoryLayer, testDisplayLayer)),
+        Effect.provide(Layer.merge(factoryLayer, testBaseLayer)),
         Effect.exit,
       ),
     );

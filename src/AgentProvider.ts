@@ -1,10 +1,35 @@
+import { Context, Layer } from "effect";
+import { parseOutputLine as claudeParseOutputLine } from "./ClaudeOutputParser.js";
 import { SANDBOX_WORKSPACE_DIR } from "./SandboxFactory.js";
 
-export interface AgentProvider {
+/** Agent output event — shared between all agent providers */
+export type AgentOutputEvent =
+  | { type: "text"; text: string }
+  | { type: "result"; result: string; usage: TokenUsage | null }
+  | { type: "tool_call"; name: string; args: string };
+
+export interface TokenUsage {
+  readonly input_tokens: number;
+  readonly output_tokens: number;
+  readonly cache_read_input_tokens: number;
+  readonly cache_creation_input_tokens: number;
+  readonly total_cost_usd: number;
+  readonly num_turns: number;
+  readonly duration_ms: number;
+}
+
+export interface AgentProviderService {
   readonly name: string;
   readonly envManifest: Record<string, string>;
   readonly dockerfileTemplate: string;
+  readonly buildCommand: (prompt: string, model: string) => string;
+  readonly parseOutputLine: (line: string) => AgentOutputEvent[];
 }
+
+export class AgentProvider extends Context.Tag("AgentProvider")<
+  AgentProvider,
+  AgentProviderService
+>() {}
 
 const CLAUDE_CODE_DOCKERFILE = `FROM node:22-bookworm
 
@@ -41,7 +66,10 @@ WORKDIR /home/agent
 ENTRYPOINT ["sleep", "infinity"]
 `;
 
-export const claudeCodeProvider: AgentProvider = {
+export const shellEscape = (s: string): string =>
+  "'" + s.replace(/'/g, "'\\''") + "'";
+
+export const claudeCodeProvider: AgentProviderService = {
   name: "claude-code",
 
   envManifest: {
@@ -50,13 +78,26 @@ export const claudeCodeProvider: AgentProvider = {
   },
 
   dockerfileTemplate: CLAUDE_CODE_DOCKERFILE,
+
+  buildCommand: (prompt: string, model: string): string =>
+    `claude --print --verbose --dangerously-skip-permissions --output-format stream-json --model ${model} -p ${shellEscape(prompt)}`,
+
+  parseOutputLine: claudeParseOutputLine,
 };
 
-const AGENT_REGISTRY: Record<string, AgentProvider> = {
+export const ClaudeCodeProvider = {
+  layer: Layer.succeed(AgentProvider, claudeCodeProvider),
+};
+
+const AGENT_REGISTRY: Record<string, AgentProviderService> = {
   "claude-code": claudeCodeProvider,
 };
 
-export const getAgentProvider = (name: string): AgentProvider => {
+export const registerAgentProvider = (provider: AgentProviderService): void => {
+  AGENT_REGISTRY[provider.name] = provider;
+};
+
+export const getAgentProvider = (name: string): AgentProviderService => {
   const provider = AGENT_REGISTRY[name];
   if (!provider) {
     throw new Error(

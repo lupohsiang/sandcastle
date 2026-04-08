@@ -2,7 +2,7 @@ import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
-import { getAgentProvider } from "./AgentProvider.js";
+import { ClaudeCodeProvider, getAgentProvider } from "./AgentProvider.js";
 import {
   ClackDisplay,
   Display,
@@ -285,7 +285,11 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
     ),
   );
 
-  const runLayer = Layer.merge(factoryLayer, displayLayer);
+  const runLayer = Layer.mergeAll(
+    factoryLayer,
+    displayLayer,
+    ClaudeCodeProvider.layer,
+  );
 
   const result = await Effect.runPromise(
     Effect.gen(function* () {

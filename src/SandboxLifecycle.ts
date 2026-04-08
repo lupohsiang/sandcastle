@@ -53,12 +53,16 @@ export interface SandboxLifecycleResult<A> {
   readonly commits: { sha: string }[];
 }
 
-export const withSandboxLifecycle = <A>(
+export const withSandboxLifecycle = <A, R = never>(
   options: SandboxLifecycleOptions,
   work: (
     ctx: SandboxContext,
-  ) => Effect.Effect<A, SandboxError, Sandbox | Display>,
-): Effect.Effect<SandboxLifecycleResult<A>, SandboxError, Sandbox | Display> =>
+  ) => Effect.Effect<A, SandboxError, Sandbox | Display | R>,
+): Effect.Effect<
+  SandboxLifecycleResult<A>,
+  SandboxError,
+  Sandbox | Display | R
+> =>
   Effect.gen(function* () {
     const sandbox = yield* Sandbox;
     const display = yield* Display;

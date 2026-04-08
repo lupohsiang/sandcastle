@@ -2,7 +2,7 @@ import { FileSystem } from "@effect/platform";
 import { Effect } from "effect";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { AgentProvider } from "./AgentProvider.js";
+import type { AgentProviderService as AgentProvider } from "./AgentProvider.js";
 
 const GITIGNORE = `.env
 logs/

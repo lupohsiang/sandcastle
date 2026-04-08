@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { scaffold, getNextStepsLines } from "./InitService.js";
-import type { AgentProvider } from "./AgentProvider.js";
+import type { AgentProviderService as AgentProvider } from "./AgentProvider.js";
 import { claudeCodeProvider } from "./AgentProvider.js";
 import { SANDBOX_WORKSPACE_DIR } from "./SandboxFactory.js";
 import { SKELETON_PROMPT } from "./templates.js";
@@ -24,6 +24,8 @@ const fakeProvider: AgentProvider = {
     FAKE_SECRET: "Fake agent secret",
   },
   dockerfileTemplate: "FROM ubuntu:latest\nRUN echo fake\n",
+  buildCommand: () => "",
+  parseOutputLine: () => [],
 };
 
 describe("InitService scaffold", () => {
