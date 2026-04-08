@@ -33,18 +33,22 @@ describe("CopilotProvider", () => {
       }).pipe(Effect.provide(CopilotProvider.layer)),
     );
     expect(result).toBe(
-      "copilot -p 'test prompt' --autopilot --yolo --no-ask-user --silent --model=gpt-4o --output-format=json",
+      "copilot -p 'test prompt' --autopilot --yolo --no-ask-user -s --model=gpt-4o --output-format=json",
     );
   });
 
-  it("parseOutputLine returns empty array (stub)", async () => {
+  it("parseOutputLine delegates to CopilotOutputParser", async () => {
+    const line = JSON.stringify({
+      type: "assistant.message",
+      data: { messageId: "m1", content: "Hello from Copilot" },
+    });
     const result = await Effect.runPromise(
       Effect.gen(function* () {
         const provider = yield* AgentProvider;
-        return provider.parseOutputLine('{"some":"json"}');
+        return provider.parseOutputLine(line);
       }).pipe(Effect.provide(CopilotProvider.layer)),
     );
-    expect(result).toEqual([]);
+    expect(result).toEqual([{ type: "text", text: "Hello from Copilot" }]);
   });
 
   it("dockerfileTemplate contains copilot", async () => {

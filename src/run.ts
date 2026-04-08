@@ -2,7 +2,9 @@ import { NodeContext, NodeFileSystem } from "@effect/platform-node";
 import path, { join } from "node:path";
 import { styleText } from "node:util";
 import { Effect, Layer } from "effect";
-import { ClaudeCodeProvider, getAgentProvider } from "./AgentProvider.js";
+import { AgentProvider, getAgentProvider } from "./AgentProvider.js";
+// Side-effect imports to register agent providers in the registry
+import "./CopilotProvider.js";
 import {
   ClackDisplay,
   Display,
@@ -150,6 +152,8 @@ export interface RunOptions {
   readonly prompt?: string;
   /** Path to a prompt file (mutually exclusive with prompt) */
   readonly promptFile?: string;
+  /** Agent provider name (default: "claude-code"). Must be registered via registerAgentProvider(). */
+  readonly agent?: string;
   /** Maximum iterations to run (default: 1) */
   readonly maxIterations?: number;
   /** Hooks to run during sandbox lifecycle */
@@ -215,8 +219,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   // Resolve model: explicit option > default
   const resolvedModel = model;
 
-  // Agent is hardcoded to claude-code (agent selection is not part of the public API)
-  const agentName = "claude-code";
+  const agentName = options.agent ?? "claude-code";
   const provider = getAgentProvider(agentName);
 
   // Resolve image name: explicit option > default
@@ -288,7 +291,7 @@ export const run = async (options: RunOptions): Promise<RunResult> => {
   const runLayer = Layer.mergeAll(
     factoryLayer,
     displayLayer,
-    ClaudeCodeProvider.layer,
+    Layer.succeed(AgentProvider, provider),
   );
 
   const result = await Effect.runPromise(

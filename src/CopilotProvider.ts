@@ -5,6 +5,7 @@ import {
   shellEscape,
   type AgentProviderService,
 } from "./AgentProvider.js";
+import { parseOutputLine as copilotParseOutputLine } from "./CopilotOutputParser.js";
 import { SANDBOX_WORKSPACE_DIR } from "./SandboxFactory.js";
 
 const COPILOT_DOCKERFILE = `FROM node:22-bookworm
@@ -50,8 +51,8 @@ export const copilotProviderService: AgentProviderService = {
   },
   dockerfileTemplate: COPILOT_DOCKERFILE,
   buildCommand: (prompt: string, model: string): string =>
-    `copilot -p ${shellEscape(prompt)} --autopilot --yolo --no-ask-user --silent --model=${model} --output-format=json`,
-  parseOutputLine: () => [],
+    `copilot -p ${shellEscape(prompt)} --autopilot --yolo --no-ask-user -s --model=${model} --output-format=json`,
+  parseOutputLine: copilotParseOutputLine,
 };
 
 // Register copilot in the agent registry
